@@ -878,24 +878,58 @@ Retourne exactement ce JSON valide en français :
     });
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.15,
-        },
-      }),
-    }
-  );
+  const models = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+  const requestBody = JSON.stringify({
+    contents: [{ parts }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      temperature: 0.15,
+    },
+  });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Erreur API Gemini (${response.status}) : ${errText.slice(0, 180)}`);
+  let response: Response | undefined;
+  let lastErrorStatus = 0;
+  let lastErrorText = '';
+
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody,
+        }
+      );
+
+      if (response.ok) break;
+
+      lastErrorStatus = response.status;
+      lastErrorText = await response.text();
+
+      // Retry transient overload/rate-limit once after a short pause, otherwise move to fallback model
+      const isTransient = response.status === 503 || response.status === 429 || response.status === 500;
+      if (isTransient && attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        continue;
+      }
+      if (isTransient || response.status === 404) {
+        break;
+      }
+      // Non-retriable client error (e.g., 400 invalid key, 403): fail immediately
+      throw new Error(`Erreur API Gemini (${lastErrorStatus}) : ${lastErrorText.slice(0, 180)}`);
+    }
+
+    if (response?.ok) break;
+  }
+
+  if (!response || !response.ok) {
+    if (lastErrorStatus === 503 || lastErrorStatus === 429) {
+      throw new Error(
+        `Les serveurs Gemini sont temporairement surchargés (${lastErrorStatus}). Réessayez dans quelques instants ou utilisez l'OCR local.`
+      );
+    }
+    throw new Error(`Erreur API Gemini (${lastErrorStatus}) : ${lastErrorText.slice(0, 180)}`);
   }
 
   const data = await response.json();

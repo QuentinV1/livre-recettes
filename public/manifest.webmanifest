@@ -2,14 +2,14 @@
   "name": "Carnet HelloFresh — Livre de Recettes",
   "short_name": "Carnet Recettes",
   "description": "Votre livre de recettes HelloFresh local-first avec import photo/OCR, mode cuisine pas à pas et planning hebdomadaire Midi/Soir.",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#FAF9F6",
   "theme_color": "#2B871D",
   "lang": "fr",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

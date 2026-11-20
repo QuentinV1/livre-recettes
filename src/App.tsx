@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import {
   BookOpen,
   Calendar,
@@ -12,7 +13,10 @@ import {
   Moon,
   Minus,
   Users,
+  LogOut,
+  AlertCircle,
 } from 'lucide-react';
+import { auth, isFirebaseConfigured } from './lib/firebase';
 import {
   DAYS_OF_WEEK,
   DayOfWeek,
@@ -23,16 +27,18 @@ import {
   createEmptyWeeklyPlan,
 } from './types/recipe';
 import {
-  deleteRecipeById,
+  deleteUserRecipe,
   loadGeminiApiKey,
-  loadRecipes,
-  loadWeeklyPlan,
-  saveAllRecipes,
+  mergeUserRecipes,
+  replaceAllUserRecipes,
   saveGeminiApiKey,
-  saveRecipe,
-  saveWeeklyPlan,
+  saveUserRecipe,
+  saveUserWeeklyPlan,
+  subscribeUserRecipes,
+  subscribeUserWeeklyPlan,
 } from './utils/storage';
 import { SAMPLE_RECIPES } from './data/sampleRecipes';
+import { AuthScreen } from './components/AuthScreen';
 import { RecipeCard } from './components/RecipeCard';
 import { RecipeDetail } from './components/RecipeDetail';
 import { RecipeFormModal } from './components/RecipeFormModal';
@@ -42,10 +48,13 @@ import { SettingsBackupModal } from './components/SettingsBackupModal';
 type ActiveTab = 'catalog' | 'planner';
 
 export function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan>(createEmptyWeeklyPlan);
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [loading, setLoading] = useState(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('catalog');
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
@@ -71,14 +80,73 @@ export function App() {
   }, [activeTab, selectedRecipeId]);
 
   useEffect(() => {
-    (async () => {
-      const loaded = await loadRecipes();
-      setRecipes(loaded);
-      setWeeklyPlan(loadWeeklyPlan());
-      setGeminiApiKey(loadGeminiApiKey());
-      setLoading(false);
-    })();
+    setGeminiApiKey(loadGeminiApiKey());
   }, []);
+
+  useEffect(() => {
+    if (!auth) {
+      setAuthLoading(false);
+      return;
+    }
+    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      setAuthLoading(false);
+      if (!firebaseUser) {
+        setRecipes([]);
+        setWeeklyPlan(createEmptyWeeklyPlan());
+        setSelectedRecipeId(null);
+        setLoading(false);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    setLoading(true);
+    setSyncError(null);
+
+    let recipesLoaded = false;
+    let planLoaded = false;
+    const markReady = () => {
+      if (recipesLoaded && planLoaded) {
+        setLoading(false);
+      }
+    };
+
+    const unsubRecipes = subscribeUserRecipes(
+      user.uid,
+      (loaded) => {
+        setRecipes(loaded);
+        recipesLoaded = true;
+        markReady();
+      },
+      (err) => {
+        setSyncError(`Erreur Firestore (recettes) : ${err.message}`);
+        recipesLoaded = true;
+        markReady();
+      }
+    );
+
+    const unsubPlan = subscribeUserWeeklyPlan(
+      user.uid,
+      (plan) => {
+        setWeeklyPlan(plan);
+        planLoaded = true;
+        markReady();
+      },
+      (err) => {
+        setSyncError(`Erreur Firestore (planning) : ${err.message}`);
+        planLoaded = true;
+        markReady();
+      }
+    );
+
+    return () => {
+      unsubRecipes();
+      unsubPlan();
+    };
+  }, [user]);
 
   const selectedRecipe = useMemo(
     () => recipes.find((r) => r.id === selectedRecipeId) ?? null,
@@ -125,11 +193,8 @@ export function App() {
   const weeklyCount = useMemo(() => recipes.filter((r) => r.isWeekly).length, [recipes]);
 
   const handleSaveRecipe = async (recipe: Recipe) => {
-    await saveRecipe(recipe);
-    setRecipes((prev) => {
-      const exists = prev.some((r) => r.id === recipe.id);
-      return exists ? prev.map((r) => (r.id === recipe.id ? recipe : r)) : [recipe, ...prev];
-    });
+    if (!user) return;
+    await saveUserRecipe(user.uid, recipe);
     setFormModalOpen(false);
     setEditingRecipe(null);
     setSelectedRecipeId(recipe.id);
@@ -137,8 +202,8 @@ export function App() {
   };
 
   const handleDeleteRecipe = async (id: string) => {
-    await deleteRecipeById(id);
-    setRecipes((prev) => prev.filter((r) => r.id !== id));
+    if (!user) return;
+    await deleteUserRecipe(user.uid, id);
     // Nettoyer aussi le planning si cette recette était placée
     const nextPlan = { ...weeklyPlan };
     let changed = false;
@@ -153,14 +218,14 @@ export function App() {
       }
     }
     if (changed) {
-      setWeeklyPlan(nextPlan);
-      saveWeeklyPlan(nextPlan);
+      await saveUserWeeklyPlan(user.uid, nextPlan);
     }
     setSelectedRecipeId(null);
   };
 
   const handleToggleWeekly = async (recipeId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (!user) return;
     const target = recipes.find((r) => r.id === recipeId);
     if (!target) return;
     const updated: Recipe = {
@@ -168,8 +233,7 @@ export function App() {
       isWeekly: !target.isWeekly,
       updatedAt: new Date().toISOString(),
     };
-    await saveRecipe(updated);
-    setRecipes((prev) => prev.map((r) => (r.id === recipeId ? updated : r)));
+    await saveUserRecipe(user.uid, updated);
   };
 
   const handleAssignSlot = (
@@ -178,6 +242,7 @@ export function App() {
     recipeId: string | null,
     servings?: number
   ) => {
+    if (!user) return;
     const servingsKey = slot === 'midi' ? 'midiServings' : 'soirServings';
     const nextDay = { ...weeklyPlan[day], [slot]: recipeId };
     if (recipeId === null) {
@@ -190,39 +255,40 @@ export function App() {
       ...weeklyPlan,
       [day]: nextDay,
     };
-    setWeeklyPlan(nextPlan);
-    saveWeeklyPlan(nextPlan);
+    void saveUserWeeklyPlan(user.uid, nextPlan);
   };
 
   const handleClearWeek = () => {
+    if (!user) return;
     const empty = createEmptyWeeklyPlan();
-    setWeeklyPlan(empty);
-    saveWeeklyPlan(empty);
+    void saveUserWeeklyPlan(user.uid, empty);
   };
 
   const handleImportBackup = async (backup: RecipeBookBackup, mode: 'merge' | 'replace') => {
+    if (!user) return;
     if (mode === 'replace') {
-      await saveAllRecipes(backup.recipes);
-      setRecipes(backup.recipes);
+      await replaceAllUserRecipes(user.uid, backup.recipes);
       const nextPlan = backup.weeklyPlan ?? createEmptyWeeklyPlan();
-      setWeeklyPlan(nextPlan);
-      saveWeeklyPlan(nextPlan);
+      await saveUserWeeklyPlan(user.uid, nextPlan);
     } else {
       const existingIds = new Set(recipes.map((r) => r.id));
       const newOnes = backup.recipes.filter((r) => !existingIds.has(r.id));
-      const merged = [...newOnes, ...recipes];
-      await saveAllRecipes(merged);
-      setRecipes(merged);
+      await mergeUserRecipes(user.uid, newOnes);
     }
   };
 
   const handleRestoreSamples = async () => {
+    if (!user) return;
     const existingIds = new Set(recipes.map((r) => r.id));
     const missing = SAMPLE_RECIPES.filter((s) => !existingIds.has(s.id));
     if (missing.length === 0) return;
-    const merged = [...recipes, ...missing];
-    await saveAllRecipes(merged);
-    setRecipes(merged);
+    await mergeUserRecipes(user.uid, missing);
+  };
+
+  const handleSignOut = async () => {
+    if (!auth) return;
+    setSettingsOpen(false);
+    await signOut(auth);
   };
 
   const toggleFilterTag = (tag: string) => {
@@ -230,6 +296,35 @@ export function App() {
       prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
     );
   };
+
+  if (!isFirebaseConfigured) {
+    return (
+      <div className="min-h-screen bg-cream flex items-center justify-center px-4 py-10">
+        <div className="max-w-lg rounded-3xl border border-amber-200 bg-white p-6 shadow-xl space-y-3">
+          <div className="flex items-center gap-2 text-amber-700">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <h1 className="font-display text-lg font-bold">Configuration Firebase requise</h1>
+          </div>
+          <p className="text-sm text-stone-600">
+            Copiez <code>.env.example</code> vers <code>.env.local</code> et renseignez vos variables{' '}
+            <code>VITE_FIREBASE_*</code> depuis la console Firebase (Paramètres du projet &gt; Vos applications &gt; Web).
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-cream flex items-center justify-center text-sm font-medium text-stone-500">
+        Vérification de la session…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthScreen />;
+  }
 
   return (
     <div className="min-h-screen bg-cream text-stone-900 flex flex-col">
@@ -301,6 +396,16 @@ export function App() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={handleSignOut}
+              className="hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 hover:text-stone-900 sm:flex"
+              title={`Déconnexion (${user.email ?? 'compte'})`}
+              aria-label="Se déconnecter"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
               onClick={() => setSettingsOpen(true)}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 hover:text-stone-900"
               title="Sauvegarde JSON & Réglages"
@@ -327,6 +432,22 @@ export function App() {
 
       {/* Contenu Principal */}
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 sm:py-7">
+        {syncError && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
+            <span className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {syncError}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSyncError(null)}
+              className="rounded-lg p-1 hover:bg-red-100"
+              aria-label="Fermer l'alerte"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         {loading ? (
           <div className="flex h-64 items-center justify-center text-sm font-medium text-stone-500">
             Chargement de votre livre de recettes…
@@ -561,6 +682,9 @@ export function App() {
           recipes={recipes}
           weeklyPlan={weeklyPlan}
           geminiApiKey={geminiApiKey}
+          userEmail={user.email}
+          userDisplayName={user.displayName}
+          onSignOut={handleSignOut}
           onSaveGeminiKey={(k) => {
             saveGeminiApiKey(k);
             setGeminiApiKey(k);

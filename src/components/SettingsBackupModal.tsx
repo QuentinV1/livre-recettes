@@ -7,6 +7,8 @@ import {
   RotateCcw,
   CheckCircle2,
   AlertCircle,
+  LogOut,
+  User,
 } from 'lucide-react';
 import { Recipe, RecipeBookBackup, WeeklyPlan } from '../types/recipe';
 import { downloadBackupJson } from '../utils/storage';
@@ -15,6 +17,9 @@ interface SettingsBackupModalProps {
   recipes: Recipe[];
   weeklyPlan: WeeklyPlan;
   geminiApiKey: string;
+  userEmail?: string | null;
+  userDisplayName?: string | null;
+  onSignOut: () => void;
   onSaveGeminiKey: (key: string) => void;
   onImportBackup: (backup: RecipeBookBackup, mode: 'merge' | 'replace') => void;
   onRestoreSamples: () => void;
@@ -25,6 +30,9 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   recipes,
   weeklyPlan,
   geminiApiKey,
+  userEmail,
+  userDisplayName,
+  onSignOut,
   onSaveGeminiKey,
   onImportBackup,
   onRestoreSamples,
@@ -81,13 +89,38 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
+          {/* Compte connecté */}
+          <section className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-fresh-100 text-fresh-700">
+                <User className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-stone-900">
+                  {userDisplayName || 'Mon compte'}
+                </p>
+                {userEmail && (
+                  <p className="truncate text-xs text-stone-500">{userEmail}</p>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-stone-700 hover:bg-stone-100"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Déconnexion
+            </button>
+          </section>
+
           {/* Export / Import JSON */}
           <section className="rounded-2xl border border-stone-200 p-4 space-y-3">
             <h3 className="text-sm font-bold text-stone-900">
-              Export / Import JSON (Local-first)
+              Export / Import JSON
             </h3>
             <p className="text-xs text-stone-500">
-              Toutes vos recettes, photos et votre planning hebdomadaire sont stockés localement sur cet appareil ({recipes.length} recette{recipes.length > 1 ? 's' : ''}).
+              Vos recettes, photos et votre planning hebdomadaire sont synchronisés sur votre compte ({recipes.length} recette{recipes.length > 1 ? 's' : ''}). Vous pouvez aussi exporter ou importer une sauvegarde JSON.
             </p>
 
             <button

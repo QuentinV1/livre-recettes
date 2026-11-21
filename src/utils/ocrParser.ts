@@ -1,3 +1,5 @@
+import { getAI, getGenerativeModel, GoogleAIBackend, type Part } from 'firebase/ai';
+import { app } from '../lib/firebase';
 import {
   Ingredient,
   NutritionRow,
@@ -878,62 +880,102 @@ Retourne exactement ce JSON valide en français :
     });
   }
 
-  const models = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
-  const requestBody = JSON.stringify({
-    contents: [{ parts }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.15,
-    },
-  });
+  const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  let rawJson = '';
 
-  let response: Response | undefined;
-  let lastErrorStatus = 0;
-  let lastErrorText = '';
+  if (app) {
+    const ai = getAI(app, { backend: new GoogleAIBackend() });
+    const aiParts: (string | Part)[] = [
+      String(parts[0].text ?? ''),
+      ...parts.slice(1).map((p) => {
+        const inline = p.inline_data as { mime_type: string; data: string };
+        return { type: 'inlineData', inlineData: { mimeType: inline.mime_type, data: inline.data } } as Part;
+      }),
+    ];
 
-  for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: requestBody,
-        }
-      );
-
-      if (response.ok) break;
-
-      lastErrorStatus = response.status;
-      lastErrorText = await response.text();
-
-      // Retry transient overload/rate-limit once after a short pause, otherwise move to fallback model
-      const isTransient = response.status === 503 || response.status === 429 || response.status === 500;
-      if (isTransient && attempt === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-        continue;
-      }
-      if (isTransient || response.status === 404) {
+    let lastAiError: unknown;
+    for (const modelName of models) {
+      try {
+        const model = getGenerativeModel(ai, {
+          model: modelName,
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.15,
+          },
+        });
+        const res = await model.generateContent(aiParts);
+        rawJson = res.response.text() || '{}';
         break;
+      } catch (err) {
+        lastAiError = err;
       }
-      // Non-retriable client error (e.g., 400 invalid key, 403): fail immediately
+    }
+    if (!rawJson) {
+      throw new Error(
+        lastAiError instanceof Error
+          ? `Erreur Firebase AI Logic : ${lastAiError.message}`
+          : 'Erreur Firebase AI Logic.'
+      );
+    }
+  } else {
+    if (!apiKey) {
+      throw new Error('Firebase AI Logic non initialisé et aucune clé API fournie.');
+    }
+    const requestBody = JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.15,
+      },
+    });
+
+    let response: Response | undefined;
+    let lastErrorStatus = 0;
+    let lastErrorText = '';
+
+    for (const model of models) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: requestBody,
+          }
+        );
+
+        if (response.ok) break;
+
+        lastErrorStatus = response.status;
+        lastErrorText = await response.text();
+
+        const isTransient = response.status === 503 || response.status === 429 || response.status === 500;
+        if (isTransient && attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+          continue;
+        }
+        if (isTransient || response.status === 404) {
+          break;
+        }
+        throw new Error(`Erreur API Gemini (${lastErrorStatus}) : ${lastErrorText.slice(0, 180)}`);
+      }
+
+      if (response?.ok) break;
+    }
+
+    if (!response || !response.ok) {
+      if (lastErrorStatus === 503 || lastErrorStatus === 429) {
+        throw new Error(
+          `Les serveurs Gemini sont temporairement surchargés (${lastErrorStatus}). Réessayez dans quelques instants ou utilisez l'OCR local.`
+        );
+      }
       throw new Error(`Erreur API Gemini (${lastErrorStatus}) : ${lastErrorText.slice(0, 180)}`);
     }
 
-    if (response?.ok) break;
+    const data = await response.json();
+    rawJson = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
   }
 
-  if (!response || !response.ok) {
-    if (lastErrorStatus === 503 || lastErrorStatus === 429) {
-      throw new Error(
-        `Les serveurs Gemini sont temporairement surchargés (${lastErrorStatus}). Réessayez dans quelques instants ou utilisez l'OCR local.`
-      );
-    }
-    throw new Error(`Erreur API Gemini (${lastErrorStatus}) : ${lastErrorText.slice(0, 180)}`);
-  }
-
-  const data = await response.json();
-  const rawJson = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
   const parsed = JSON.parse(rawJson);
 
   const stepDetails: RecipeStep[] = Array.isArray(parsed.stepDetails)

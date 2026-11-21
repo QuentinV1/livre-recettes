@@ -154,10 +154,6 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   };
 
   const handleRunGeminiVision = async () => {
-    if (!geminiApiKey) {
-      setOcrError('Configurez une clé API Gemini dans Réglages / Sauvegarde pour utiliser Vision.');
-      return;
-    }
     if (!imageBack && !imageFront) {
       setOcrError('Ajoutez au moins une photo (verso ou recto) à analyser.');
       return;
@@ -423,17 +419,15 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
                     Extraire via OCR local (Tesseract)
                   </button>
 
-                  {geminiApiKey && (
-                    <button
-                      type="button"
-                      disabled={ocrLoading}
-                      onClick={handleRunGeminiVision}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-fresh-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-fresh-700 disabled:opacity-50"
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      Extraire via Gemini Vision
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    disabled={ocrLoading}
+                    onClick={handleRunGeminiVision}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-fresh-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-fresh-700 disabled:opacity-50"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Extraire via Gemini Vision
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-2">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Download,
@@ -9,6 +9,8 @@ import {
   AlertCircle,
   Cloud,
   User,
+  LayoutGrid,
+  ExternalLink,
 } from 'lucide-react';
 import { Recipe, RecipeBookBackup, WeeklyPlan } from '../types/recipe';
 import { downloadBackupJson } from '../utils/storage';
@@ -41,6 +43,19 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   const [keyInput, setKeyInput] = useState(geminiApiKey);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [showOtherApps, setShowOtherApps] = useState(false);
+
+  useEffect(() => {
+    if (!showOtherApps) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setShowOtherApps(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [showOtherApps]);
 
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -225,6 +240,24 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
             </button>
           </section>
 
+          {/* Mes autres applications */}
+          <section className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-stone-900">Mes autres applications</p>
+              <p className="text-xs text-stone-500">
+                Accéder rapidement aux autres applications web (GitHub Pages).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowOtherApps(true)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-fresh-600 px-3 py-2 text-xs font-semibold text-white hover:bg-fresh-700"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Ouvrir
+            </button>
+          </section>
+
           {feedback && (
             <div
               className={`flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold ${
@@ -243,6 +276,78 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
           )}
         </div>
       </div>
+
+      {showOtherApps && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 backdrop-blur-xs sm:items-center sm:p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowOtherApps(false);
+          }}
+        >
+          <div
+            className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+              <h3 className="flex items-center gap-2 font-display text-lg font-bold text-stone-900">
+                <LayoutGrid className="h-5 w-5 text-fresh-600" />
+                Mes autres applications
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowOtherApps(false)}
+                className="rounded-xl p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+                aria-label="Fermer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 space-y-2.5 overflow-y-auto p-5">
+              <p className="text-xs text-stone-500">
+                Retrouvez toutes les autres applications hébergées sur GitHub Pages.
+              </p>
+              <div className="grid gap-2">
+                {[
+                  { name: "L'Affinoir", desc: "Charcuterie, salaisons & cave d'affinage", url: 'https://quentinv1.github.io/app-charcuterie/' },
+                  { name: 'Pêche France', desc: 'Réglementation, mailles, cartes & carnet de prises', url: 'https://quentinv1.github.io/app-peche/' },
+                  { name: 'App Voyage', desc: "Planificateur d'itinéraire, carte & carnet de voyage", url: 'https://quentinv1.github.io/app-voyage/' },
+                  { name: 'Budget Prévisionnel', desc: 'Budget du foyer, provisions & projections', url: 'https://quentinv1.github.io/budget-previsionnel/' },
+                  { name: 'Cave à vin', desc: 'Stock de bouteilles, apogée & dégustations', url: 'https://quentinv1.github.io/cave-a-vin/' },
+                  { name: 'Checklist Valise', desc: 'Bagages, calculateur de poids & règles IATA', url: 'https://quentinv1.github.io/checklist-valise/' },
+                  { name: 'Suivi Chasse', desc: 'Carnet de sorties, carte & album trophées', url: 'https://quentinv1.github.io/suivi-chasse/' },
+                  { name: 'Travaux Maison', desc: 'Plan 2D/3D, courses, tâches & entretien', url: 'https://quentinv1.github.io/travaux-maison/' },
+                ].map((app) => (
+                  <a
+                    key={app.url}
+                    href={app.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 px-3.5 py-2.5 transition hover:border-fresh-300 hover:bg-fresh-50/40"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-stone-900">{app.name}</div>
+                      <div className="truncate text-xs text-stone-500">{app.desc}</div>
+                    </div>
+                    <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-fresh-700">
+                      Ouvrir <ExternalLink className="h-3.5 w-3.5" />
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end border-t border-stone-200 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setShowOtherApps(false)}
+                className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

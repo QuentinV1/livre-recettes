@@ -1,4 +1,4 @@
-const CACHE_NAME = 'carnet-hellofresh-v1';
+const CACHE_NAME = 'carnet-hellofresh-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

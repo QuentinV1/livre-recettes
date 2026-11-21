@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { User as FirebaseUser } from 'firebase/auth';
 import {
   BookOpen,
   Calendar,
@@ -13,10 +13,11 @@ import {
   Moon,
   Minus,
   Users,
-  LogOut,
   AlertCircle,
+  Cloud,
+  User as UserIcon,
 } from 'lucide-react';
-import { auth, isFirebaseConfigured } from './lib/firebase';
+import { deconnexionFirebase, observerAuth } from './lib/firebase';
 import {
   DAYS_OF_WEEK,
   DayOfWeek,
@@ -27,18 +28,22 @@ import {
   createEmptyWeeklyPlan,
 } from './types/recipe';
 import {
-  deleteUserRecipe,
+  activerSyncCloud,
+  arreterListenersFirestore,
+  cloudState as initialCloudState,
+  CloudState,
+  deleteLocalPhotoById,
+  forcerSyncCloud,
   loadGeminiApiKey,
-  mergeUserRecipes,
-  replaceAllUserRecipes,
+  loadLocalRecipes,
+  loadLocalWeeklyPlan,
+  reinitialiserEtatCloud,
+  sauvegarderDonnees,
   saveGeminiApiKey,
-  saveUserRecipe,
-  saveUserWeeklyPlan,
-  subscribeUserRecipes,
-  subscribeUserWeeklyPlan,
+  subscribeCloudState,
 } from './utils/storage';
 import { SAMPLE_RECIPES } from './data/sampleRecipes';
-import { AuthScreen } from './components/AuthScreen';
+import { CloudAuthModal } from './components/AuthScreen';
 import { RecipeCard } from './components/RecipeCard';
 import { RecipeDetail } from './components/RecipeDetail';
 import { RecipeFormModal } from './components/RecipeFormModal';
@@ -47,14 +52,29 @@ import { SettingsBackupModal } from './components/SettingsBackupModal';
 
 type ActiveTab = 'catalog' | 'planner';
 
+const APP_VERSION = '1.1.0';
+
 export function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan>(createEmptyWeeklyPlan);
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [loading, setLoading] = useState(true);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  const [cloud, setCloud] = useState<CloudState>(initialCloudState);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+
+  const recipesRef = useRef<Recipe[]>([]);
+  const weeklyPlanRef = useRef<WeeklyPlan>(createEmptyWeeklyPlan());
+
+  const updateRecipesState = useCallback((next: Recipe[]) => {
+    recipesRef.current = next;
+    setRecipes(next);
+  }, []);
+
+  const updateWeeklyPlanState = useCallback((next: WeeklyPlan) => {
+    weeklyPlanRef.current = next;
+    setWeeklyPlan(next);
+  }, []);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('catalog');
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
@@ -68,6 +88,7 @@ export function App() {
   const [onlyWeekly, setOnlyWeekly] = useState(false);
 
   // Modales
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -80,73 +101,64 @@ export function App() {
   }, [activeTab, selectedRecipeId]);
 
   useEffect(() => {
-    setGeminiApiKey(loadGeminiApiKey());
-  }, []);
-
-  useEffect(() => {
-    if (!auth) {
-      setAuthLoading(false);
-      return;
-    }
-    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setAuthLoading(false);
-      if (!firebaseUser) {
-        setRecipes([]);
-        setWeeklyPlan(createEmptyWeeklyPlan());
-        setSelectedRecipeId(null);
-        setLoading(false);
+    return subscribeCloudState((state) => {
+      setCloud(state);
+      if (!state.syncError) {
+        setDismissedError(null);
       }
     });
-    return () => unsub();
   }, []);
 
+  const startCloudSync = useCallback(async () => {
+    await activerSyncCloud({
+      getLocalRecipes: () => recipesRef.current,
+      getLocalWeeklyPlan: () => weeklyPlanRef.current,
+      onRecipesChange: (syncedRecipes) => {
+        updateRecipesState(syncedRecipes);
+      },
+      onWeeklyPlanChange: (syncedPlan) => {
+        updateWeeklyPlanState(syncedPlan);
+      },
+    });
+  }, [updateRecipesState, updateWeeklyPlanState]);
+
+  // Chargement initial local-first puis écoute Auth
   useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    setSyncError(null);
+    let unsubAuth: (() => void) | null = null;
+    let cancelled = false;
 
-    let recipesLoaded = false;
-    let planLoaded = false;
-    const markReady = () => {
-      if (recipesLoaded && planLoaded) {
+    setGeminiApiKey(loadGeminiApiKey());
+    const localPlan = loadLocalWeeklyPlan();
+    updateWeeklyPlanState(localPlan);
+
+    loadLocalRecipes()
+      .then((localRecs) => {
+        if (cancelled) return;
+        updateRecipesState(localRecs);
         setLoading(false);
-      }
-    };
 
-    const unsubRecipes = subscribeUserRecipes(
-      user.uid,
-      (loaded) => {
-        setRecipes(loaded);
-        recipesLoaded = true;
-        markReady();
-      },
-      (err) => {
-        setSyncError(`Erreur Firestore (recettes) : ${err.message}`);
-        recipesLoaded = true;
-        markReady();
-      }
-    );
-
-    const unsubPlan = subscribeUserWeeklyPlan(
-      user.uid,
-      (plan) => {
-        setWeeklyPlan(plan);
-        planLoaded = true;
-        markReady();
-      },
-      (err) => {
-        setSyncError(`Erreur Firestore (planning) : ${err.message}`);
-        planLoaded = true;
-        markReady();
-      }
-    );
+        unsubAuth = observerAuth((firebaseUser) => {
+          if (cancelled) return;
+          setUser(firebaseUser);
+          if (firebaseUser) {
+            void startCloudSync();
+          } else {
+            arreterListenersFirestore();
+            reinitialiserEtatCloud();
+          }
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
 
     return () => {
-      unsubRecipes();
-      unsubPlan();
+      cancelled = true;
+      if (unsubAuth) unsubAuth();
+      arreterListenersFirestore();
     };
-  }, [user]);
+  }, [startCloudSync, updateRecipesState, updateWeeklyPlanState]);
 
   const selectedRecipe = useMemo(
     () => recipes.find((r) => r.id === selectedRecipeId) ?? null,
@@ -193,8 +205,14 @@ export function App() {
   const weeklyCount = useMemo(() => recipes.filter((r) => r.isWeekly).length, [recipes]);
 
   const handleSaveRecipe = async (recipe: Recipe) => {
-    if (!user) return;
-    await saveUserRecipe(user.uid, recipe);
+    const nextRecipes = [
+      recipe,
+      ...recipesRef.current.filter((r) => r.id !== recipe.id),
+    ].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+
+    updateRecipesState(nextRecipes);
+    await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
+
     setFormModalOpen(false);
     setEditingRecipe(null);
     setSelectedRecipeId(recipe.id);
@@ -202,38 +220,37 @@ export function App() {
   };
 
   const handleDeleteRecipe = async (id: string) => {
-    if (!user) return;
-    await deleteUserRecipe(user.uid, id);
-    // Nettoyer aussi le planning si cette recette était placée
-    const nextPlan = { ...weeklyPlan };
-    let changed = false;
+    const nextRecipes = recipesRef.current.filter((r) => r.id !== id);
+    await deleteLocalPhotoById(id);
+
+    const nextPlan = { ...weeklyPlanRef.current };
     for (const d of DAYS_OF_WEEK) {
       if (nextPlan[d.key].midi === id) {
         nextPlan[d.key] = { ...nextPlan[d.key], midi: null };
-        changed = true;
       }
       if (nextPlan[d.key].soir === id) {
         nextPlan[d.key] = { ...nextPlan[d.key], soir: null };
-        changed = true;
       }
     }
-    if (changed) {
-      await saveUserWeeklyPlan(user.uid, nextPlan);
-    }
+
+    updateRecipesState(nextRecipes);
+    updateWeeklyPlanState(nextPlan);
+    await sauvegarderDonnees(nextRecipes, nextPlan);
     setSelectedRecipeId(null);
   };
 
   const handleToggleWeekly = async (recipeId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!user) return;
-    const target = recipes.find((r) => r.id === recipeId);
+    const target = recipesRef.current.find((r) => r.id === recipeId);
     if (!target) return;
     const updated: Recipe = {
       ...target,
       isWeekly: !target.isWeekly,
       updatedAt: new Date().toISOString(),
     };
-    await saveUserRecipe(user.uid, updated);
+    const nextRecipes = recipesRef.current.map((r) => (r.id === recipeId ? updated : r));
+    updateRecipesState(nextRecipes);
+    await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
   };
 
   const handleAssignSlot = (
@@ -242,9 +259,8 @@ export function App() {
     recipeId: string | null,
     servings?: number
   ) => {
-    if (!user) return;
     const servingsKey = slot === 'midi' ? 'midiServings' : 'soirServings';
-    const nextDay = { ...weeklyPlan[day], [slot]: recipeId };
+    const nextDay = { ...weeklyPlanRef.current[day], [slot]: recipeId };
     if (recipeId === null) {
       delete nextDay[servingsKey];
     } else if (servings !== undefined) {
@@ -252,43 +268,59 @@ export function App() {
     }
 
     const nextPlan: WeeklyPlan = {
-      ...weeklyPlan,
+      ...weeklyPlanRef.current,
       [day]: nextDay,
     };
-    void saveUserWeeklyPlan(user.uid, nextPlan);
+    updateWeeklyPlanState(nextPlan);
+    void sauvegarderDonnees(recipesRef.current, nextPlan);
   };
 
   const handleClearWeek = () => {
-    if (!user) return;
     const empty = createEmptyWeeklyPlan();
-    void saveUserWeeklyPlan(user.uid, empty);
+    updateWeeklyPlanState(empty);
+    void sauvegarderDonnees(recipesRef.current, empty);
   };
 
   const handleImportBackup = async (backup: RecipeBookBackup, mode: 'merge' | 'replace') => {
-    if (!user) return;
     if (mode === 'replace') {
-      await replaceAllUserRecipes(user.uid, backup.recipes);
+      const nextRecipes = backup.recipes.map((r) => ({ ...r, id: String(r.id) }));
       const nextPlan = backup.weeklyPlan ?? createEmptyWeeklyPlan();
-      await saveUserWeeklyPlan(user.uid, nextPlan);
+      updateRecipesState(nextRecipes);
+      updateWeeklyPlanState(nextPlan);
+      await sauvegarderDonnees(nextRecipes, nextPlan);
     } else {
-      const existingIds = new Set(recipes.map((r) => r.id));
-      const newOnes = backup.recipes.filter((r) => !existingIds.has(r.id));
-      await mergeUserRecipes(user.uid, newOnes);
+      const existingIds = new Set(recipesRef.current.map((r) => String(r.id)));
+      const newOnes = backup.recipes
+        .filter((r) => r && r.id && !existingIds.has(String(r.id)))
+        .map((r) => ({ ...r, id: String(r.id) }));
+      const nextRecipes = [...recipesRef.current, ...newOnes].sort((a, b) =>
+        (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
+      );
+      updateRecipesState(nextRecipes);
+      await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
     }
   };
 
   const handleRestoreSamples = async () => {
-    if (!user) return;
-    const existingIds = new Set(recipes.map((r) => r.id));
-    const missing = SAMPLE_RECIPES.filter((s) => !existingIds.has(s.id));
+    const existingIds = new Set(recipesRef.current.map((r) => String(r.id)));
+    const missing = SAMPLE_RECIPES.filter((s) => !existingIds.has(String(s.id)));
     if (missing.length === 0) return;
-    await mergeUserRecipes(user.uid, missing);
+    const nextRecipes = [...recipesRef.current, ...missing].sort((a, b) =>
+      (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
+    );
+    updateRecipesState(nextRecipes);
+    await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
   };
 
   const handleSignOut = async () => {
-    if (!auth) return;
-    setSettingsOpen(false);
-    await signOut(auth);
+    arreterListenersFirestore();
+    await deconnexionFirebase();
+    reinitialiserEtatCloud();
+    setUser(null);
+  };
+
+  const handleForceSync = async () => {
+    await forcerSyncCloud(recipesRef.current, weeklyPlanRef.current);
   };
 
   const toggleFilterTag = (tag: string) => {
@@ -297,34 +329,12 @@ export function App() {
     );
   };
 
-  if (!isFirebaseConfigured) {
-    return (
-      <div className="min-h-screen bg-cream flex items-center justify-center px-4 py-10">
-        <div className="max-w-lg rounded-3xl border border-amber-200 bg-white p-6 shadow-xl space-y-3">
-          <div className="flex items-center gap-2 text-amber-700">
-            <AlertCircle className="h-5 w-5 shrink-0" />
-            <h1 className="font-display text-lg font-bold">Configuration Firebase requise</h1>
-          </div>
-          <p className="text-sm text-stone-600">
-            Copiez <code>.env.example</code> vers <code>.env.local</code> et renseignez vos variables{' '}
-            <code>VITE_FIREBASE_*</code> depuis la console Firebase (Paramètres du projet &gt; Vos applications &gt; Web).
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const authLabel = user
+    ? (user.email || user.displayName || 'Cloud').split('@')[0]
+    : 'Connexion';
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-cream flex items-center justify-center text-sm font-medium text-stone-500">
-        Vérification de la session…
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <AuthScreen />;
-  }
+  const visibleSyncError =
+    cloud.syncError && cloud.syncError !== dismissedError ? cloud.syncError : null;
 
   return (
     <div className="min-h-screen bg-cream text-stone-900 flex flex-col">
@@ -344,9 +354,17 @@ export function App() {
               <UtensilsCrossed className="h-5 w-5" />
             </div>
             <div>
-              <span className="font-display text-base font-extrabold tracking-tight text-stone-900 sm:text-lg">
-                Carnet HelloFresh
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-display text-base font-extrabold tracking-tight text-stone-900 sm:text-lg">
+                  Carnet HelloFresh
+                </span>
+                <span
+                  id="header-version-badge"
+                  className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold text-stone-500"
+                >
+                  v{APP_VERSION}
+                </span>
+              </div>
               <p className="hidden text-[11px] font-medium text-stone-500 sm:block">
                 {recipes.length} recette{recipes.length > 1 ? 's' : ''} · {weeklyCount} cette semaine
               </p>
@@ -396,12 +414,28 @@ export function App() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handleSignOut}
-              className="hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 hover:text-stone-900 sm:flex"
-              title={`Déconnexion (${user.email ?? 'compte'})`}
-              aria-label="Se déconnecter"
+              id="btn-auth-header"
+              onClick={() => setAuthModalOpen(true)}
+              title={
+                user
+                  ? `Connecté : ${user.email || user.uid}`
+                  : 'Se connecter au Cloud'
+              }
+              aria-label="Compte Cloud"
+              className={`inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold transition-colors ${
+                user
+                  ? cloud.syncStatus === 'error'
+                    ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
+                    : 'border-fresh-200 bg-fresh-50/70 text-fresh-800 hover:bg-fresh-100'
+                  : 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50 hover:text-stone-900'
+              }`}
             >
-              <LogOut className="h-4 w-4" />
+              {user ? (
+                <UserIcon className="h-4 w-4 shrink-0" />
+              ) : (
+                <Cloud className="h-4 w-4 shrink-0 text-fresh-600" />
+              )}
+              <span className="btn-text max-w-[110px] truncate">{authLabel}</span>
             </button>
 
             <button
@@ -432,15 +466,15 @@ export function App() {
 
       {/* Contenu Principal */}
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 sm:py-7">
-        {syncError && (
+        {visibleSyncError && (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
             <span className="flex items-center gap-2">
               <AlertCircle className="h-4 w-4 shrink-0" />
-              {syncError}
+              {visibleSyncError}
             </span>
             <button
               type="button"
-              onClick={() => setSyncError(null)}
+              onClick={() => setDismissedError(visibleSyncError)}
               className="rounded-lg p-1 hover:bg-red-100"
               aria-label="Fermer l'alerte"
             >
@@ -663,6 +697,20 @@ export function App() {
         </button>
       </nav>
 
+      {/* Modal Connexion Cloud */}
+      {authModalOpen && (
+        <CloudAuthModal
+          user={user}
+          cloudState={cloud}
+          recipesCount={recipes.length}
+          onForceSync={handleForceSync}
+          onRestartSync={startCloudSync}
+          onUserReloaded={(u) => setUser(u)}
+          onSignOut={handleSignOut}
+          onClose={() => setAuthModalOpen(false)}
+        />
+      )}
+
       {/* Modal Ajout / Édition */}
       {formModalOpen && (
         <RecipeFormModal
@@ -682,9 +730,9 @@ export function App() {
           recipes={recipes}
           weeklyPlan={weeklyPlan}
           geminiApiKey={geminiApiKey}
-          userEmail={user.email}
-          userDisplayName={user.displayName}
-          onSignOut={handleSignOut}
+          userEmail={user?.email}
+          userDisplayName={user?.displayName}
+          onOpenCloudModal={() => setAuthModalOpen(true)}
           onSaveGeminiKey={(k) => {
             saveGeminiApiKey(k);
             setGeminiApiKey(k);

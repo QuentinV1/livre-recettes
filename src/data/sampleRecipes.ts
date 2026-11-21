@@ -12,7 +12,7 @@ export const SAMPLE_RECIPES: Recipe[] = [
     servings: 2,
     tags: ['poulet', 'classique', 'confort'],
     isWeekly: true,
-    imageFront: createDishIllustration('#FEF3C7', '#FDE68A', '#D97706', '🍗', 'Poulet Miel & Moutarde'),
+    imageFront: createDishIllustration('#FEF3C7', '#FDE68A', '#D97706', 'roast', 'Poulet Miel & Moutarde'),
     ingredients: [
       { id: 'ing-1', name: 'Filets de poulet', quantity: '2', unit: 'pièces' },
       { id: 'ing-2', name: 'Pommes de terre grenaille', quantity: '400', unit: 'g' },
@@ -41,7 +41,7 @@ export const SAMPLE_RECIPES: Recipe[] = [
     servings: 2,
     tags: ['végétarien', 'riz', 'confort'],
     isWeekly: true,
-    imageFront: createDishIllustration('#E1F6DC', '#C4ECBB', '#2B871D', '🍄', 'Risotto aux Champignons'),
+    imageFront: createDishIllustration('#E1F6DC', '#C4ECBB', '#2B871D', 'leaf', 'Risotto aux Champignons'),
     ingredients: [
       { id: 'ing-r1', name: 'Riz à risotto (Arborio)', quantity: '150', unit: 'g' },
       { id: 'ing-r2', name: 'Champignons de Paris bruns', quantity: '250', unit: 'g' },
@@ -70,7 +70,7 @@ export const SAMPLE_RECIPES: Recipe[] = [
     servings: 2,
     tags: ['healthy', 'poisson', 'riz', 'rapide'],
     isWeekly: false,
-    imageFront: createDishIllustration('#E0F2FE', '#BAE6FD', '#0284C7', '🥗', 'Bowl Saumon Teriyaki'),
+    imageFront: createDishIllustration('#E0F2FE', '#BAE6FD', '#0284C7', 'bowl', 'Bowl Saumon Teriyaki'),
     ingredients: [
       { id: 'ing-s1', name: 'Pavés de saumon', quantity: '2', unit: 'pièces' },
       { id: 'ing-s2', name: 'Riz japonais ou basmati', quantity: '150', unit: 'g' },
@@ -98,7 +98,7 @@ export const SAMPLE_RECIPES: Recipe[] = [
     servings: 2,
     tags: ['pâte', 'végétarien', 'rapide'],
     isWeekly: false,
-    imageFront: createDishIllustration('#FFEDD5', '#FED7AA', '#EA580C', '🍝', 'Penne Tomates & Basilic'),
+    imageFront: createDishIllustration('#FFEDD5', '#FED7AA', '#EA580C', 'pasta', 'Penne Tomates & Basilic'),
     ingredients: [
       { id: 'ing-p1', name: 'Penne rigate', quantity: '200', unit: 'g' },
       { id: 'ing-p2', name: 'Tomates cerises', quantity: '250', unit: 'g' },

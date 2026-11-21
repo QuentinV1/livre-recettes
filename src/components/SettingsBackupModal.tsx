@@ -7,7 +7,7 @@ import {
   RotateCcw,
   CheckCircle2,
   AlertCircle,
-  LogOut,
+  Cloud,
   User,
 } from 'lucide-react';
 import { Recipe, RecipeBookBackup, WeeklyPlan } from '../types/recipe';
@@ -19,7 +19,7 @@ interface SettingsBackupModalProps {
   geminiApiKey: string;
   userEmail?: string | null;
   userDisplayName?: string | null;
-  onSignOut: () => void;
+  onOpenCloudModal: () => void;
   onSaveGeminiKey: (key: string) => void;
   onImportBackup: (backup: RecipeBookBackup, mode: 'merge' | 'replace') => void;
   onRestoreSamples: () => void;
@@ -32,7 +32,7 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   geminiApiKey,
   userEmail,
   userDisplayName,
-  onSignOut,
+  onOpenCloudModal,
   onSaveGeminiKey,
   onImportBackup,
   onRestoreSamples,
@@ -89,28 +89,31 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
-          {/* Compte connecté */}
+          {/* Compte Cloud */}
           <section className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/70 p-4">
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-fresh-100 text-fresh-700">
-                <User className="h-5 w-5" />
+                {userEmail ? <User className="h-5 w-5" /> : <Cloud className="h-5 w-5" />}
               </div>
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold text-stone-900">
-                  {userDisplayName || 'Mon compte'}
+                  {userEmail ? userDisplayName || 'Compte Cloud actif' : 'Mode local (non connecté)'}
                 </p>
-                {userEmail && (
-                  <p className="truncate text-xs text-stone-500">{userEmail}</p>
-                )}
+                <p className="truncate text-xs text-stone-500">
+                  {userEmail || 'Vos données sont enregistrées sur cet appareil.'}
+                </p>
               </div>
             </div>
             <button
               type="button"
-              onClick={onSignOut}
+              onClick={() => {
+                onClose();
+                onOpenCloudModal();
+              }}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-stone-700 hover:bg-stone-100"
             >
-              <LogOut className="h-3.5 w-3.5" />
-              Déconnexion
+              <Cloud className="h-3.5 w-3.5 text-fresh-600" />
+              {userEmail ? 'Gérer Cloud' : 'Connexion'}
             </button>
           </section>
 
@@ -120,7 +123,7 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
               Export / Import JSON
             </h3>
             <p className="text-xs text-stone-500">
-              Vos recettes, photos et votre planning hebdomadaire sont synchronisés sur votre compte ({recipes.length} recette{recipes.length > 1 ? 's' : ''}). Vous pouvez aussi exporter ou importer une sauvegarde JSON.
+              Vos recettes et votre planning hebdomadaire sont enregistrés localement ({recipes.length} recette{recipes.length > 1 ? 's' : ''}) et synchronisés avec le Cloud lorsque vous êtes connecté (les photos restent stockées sur votre appareil). Vous pouvez aussi exporter ou importer une sauvegarde JSON complète (incluant les photos).
             </p>
 
             <button
@@ -180,7 +183,7 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
               API Gemini Vision (optionnel)
             </h3>
             <p className="text-xs text-stone-500">
-              L’OCR Tesseract fonctionne sans clé. Si vous souhaitez une extraction ultra-précise depuis vos photos, vous pouvez renseigner une clé API Google Gemini (stockée uniquement dans votre navigateur).
+              L’extraction IA passe par Firebase AI Logic (gratuit). Si vous préférez utiliser votre propre clé API Google Gemini, vous pouvez la renseigner ici (stockée uniquement dans votre navigateur).
             </p>
             <div className="flex gap-2">
               <input

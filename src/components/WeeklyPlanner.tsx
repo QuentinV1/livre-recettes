@@ -215,15 +215,15 @@ export const WeeklyPlanner: React.FC<WeeklyPlannerProps> = ({
 
       {/* Panneau Liste de courses */}
       {showShoppingList && (
-        <section className="rounded-2xl border border-fresh-200 bg-white p-5 shadow-xs">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-display text-base font-bold text-stone-900">
+        <section className="rounded-2xl border border-fresh-200 bg-white p-4 shadow-xs sm:p-5">
+          <div className="mb-3 flex items-start justify-between gap-2">
+            <h3 className="min-w-0 font-display text-base font-bold text-stone-900">
               Ingrédients nécessaires ({plannedCount > 0 ? 'd’après le planning' : 'd’après les recettes de la semaine'})
             </h3>
             <button
               type="button"
               onClick={() => setShowShoppingList(false)}
-              className="text-stone-400 hover:text-stone-700"
+              className="shrink-0 rounded-lg p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
               aria-label="Fermer la liste de courses"
             >
               <X className="h-4 w-4" />
@@ -238,10 +238,10 @@ export const WeeklyPlanner: React.FC<WeeklyPlannerProps> = ({
               {shoppingIngredients.map((item) => (
                 <div
                   key={item.name}
-                  className="flex items-center justify-between rounded-xl border border-stone-100 bg-stone-50/80 px-3 py-2 text-xs"
+                  className="flex items-center justify-between gap-2 rounded-xl border border-stone-100 bg-stone-50/80 px-3 py-2 text-xs"
                 >
-                  <span className="font-semibold text-stone-800">{item.name}</span>
-                  <span className="text-fresh-700 font-medium ml-2 text-right">
+                  <span className="min-w-0 break-words font-semibold text-stone-800">{item.name}</span>
+                  <span className="shrink-0 text-right font-medium text-fresh-700">
                     {item.quantities.length > 0 ? item.quantities.join(' + ') : `×${item.count}`}
                   </span>
                 </div>
@@ -357,7 +357,7 @@ export const WeeklyPlanner: React.FC<WeeklyPlannerProps> = ({
                       {recipe ? (
                         <div
                           onClick={() => onOpenRecipe(recipe, plannedServings)}
-                          className="group flex flex-1 flex-col justify-between rounded-xl border border-fresh-200/80 bg-fresh-50/40 p-2 cursor-pointer hover:border-fresh-400 hover:bg-fresh-50 transition-colors"
+                          className="group flex min-w-0 flex-1 flex-col justify-between rounded-xl border border-fresh-200/80 bg-fresh-50/40 p-2 cursor-pointer hover:border-fresh-400 hover:bg-fresh-50 transition-colors"
                         >
                           {recipe.imageFront && (
                             <img
@@ -441,7 +441,7 @@ export const WeeklyPlanner: React.FC<WeeklyPlannerProps> = ({
           onClick={() => setPickingSlot(null)}
         >
           <div
-            className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+            className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl sm:rounded-3xl sm:pb-0"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">

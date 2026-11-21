@@ -85,20 +85,20 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-stone-950 text-stone-50">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-stone-800 px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-3 min-w-0">
+      <header className="flex items-center justify-between gap-2 border-b border-stone-800 px-3 py-2.5 sm:px-6 sm:py-3">
+        <div className="flex items-center gap-2.5 min-w-0 sm:gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fresh-600 text-white">
             <ChefHat className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wider text-fresh-400">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-fresh-400 sm:text-xs">
               Mode Cuisine pas à pas
             </p>
             <h2 className="truncate text-sm font-bold text-white sm:text-base">{recipe.title}</h2>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={() => setShowIngredients((v) => !v)}
@@ -137,12 +137,12 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
       {/* Corps principal */}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Étape courante */}
-        <main className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-5 py-8 sm:px-10">
+        <main className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-6 sm:px-10 sm:py-8">
           {totalSteps === 0 ? (
             <p className="text-stone-400">Aucune étape enregistrée pour cette recette.</p>
           ) : (
-            <div className="w-full max-w-2xl">
-              <div className="mb-5 flex items-center justify-between">
+            <div className="w-full min-w-0 max-w-2xl break-words">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-2 rounded-full bg-fresh-500/20 px-3.5 py-1.5 text-sm font-bold text-fresh-300">
                   Étape {currentStep + 1} sur {totalSteps}
                 </span>
@@ -269,12 +269,12 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
       </div>
 
       {/* Footer Contrôles */}
-      <footer className="flex items-center justify-between border-t border-stone-800 bg-stone-900/90 px-4 py-4 sm:px-8">
+      <footer className="flex items-center justify-between gap-2 border-t border-stone-800 bg-stone-900/90 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-8 sm:py-4">
         <button
           type="button"
           onClick={() => setCurrentStep((s) => Math.max(0, s - 1))}
           disabled={currentStep === 0}
-          className="inline-flex items-center gap-2 rounded-xl bg-stone-800 px-4 py-3 text-sm font-semibold text-stone-200 transition-colors hover:bg-stone-700 disabled:opacity-40 disabled:pointer-events-none"
+          className="inline-flex items-center gap-1.5 rounded-xl bg-stone-800 px-3.5 py-2.5 text-sm font-semibold text-stone-200 transition-colors hover:bg-stone-700 disabled:opacity-40 disabled:pointer-events-none sm:gap-2 sm:px-4 sm:py-3"
         >
           <ChevronLeft className="h-5 w-5" />
           Précédent
@@ -284,7 +284,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
           <button
             type="button"
             onClick={handleCompleteAndNext}
-            className="inline-flex items-center gap-2 rounded-xl bg-fresh-500 px-6 py-3 text-sm font-bold text-stone-950 shadow-lg shadow-fresh-500/20 transition-all hover:bg-fresh-400"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-fresh-500 px-4 py-2.5 text-sm font-bold text-stone-950 shadow-lg shadow-fresh-500/20 transition-all hover:bg-fresh-400 sm:gap-2 sm:px-6 sm:py-3"
           >
             Étape suivante
             <ChevronRight className="h-5 w-5" />
@@ -296,7 +296,7 @@ export const CookingModeModal: React.FC<CookingModeModalProps> = ({
               if (!checkedSteps[currentStep]) onToggleStep(currentStep);
               onClose();
             }}
-            className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-6 py-3 text-sm font-bold text-stone-950 shadow-lg transition-all hover:bg-amber-300"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-bold text-stone-950 shadow-lg transition-all hover:bg-amber-300 sm:gap-2 sm:px-6 sm:py-3"
           >
             <Sparkles className="h-5 w-5" />
             Bon appétit ! Terminer

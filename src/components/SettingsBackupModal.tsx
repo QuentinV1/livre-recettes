@@ -4,7 +4,6 @@ import {
   Download,
   Upload,
   KeyRound,
-  RotateCcw,
   CheckCircle2,
   AlertCircle,
   Cloud,
@@ -24,7 +23,6 @@ interface SettingsBackupModalProps {
   onOpenCloudModal: () => void;
   onSaveGeminiKey: (key: string) => void;
   onImportBackup: (backup: RecipeBookBackup, mode: 'merge' | 'replace') => void;
-  onRestoreSamples: () => void;
   onClose: () => void;
 }
 
@@ -37,7 +35,6 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   onOpenCloudModal,
   onSaveGeminiKey,
   onImportBackup,
-  onRestoreSamples,
   onClose,
 }) => {
   const [keyInput, setKeyInput] = useState(geminiApiKey);
@@ -86,7 +83,7 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl"
+        className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl sm:rounded-3xl sm:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
@@ -154,7 +151,7 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
             </button>
 
             <div className="pt-2 border-t border-stone-100 space-y-2">
-              <div className="flex items-center justify-between text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <span className="font-semibold text-stone-700">Mode d’import :</span>
                 <div className="flex rounded-lg bg-stone-100 p-0.5">
                   <button
@@ -200,13 +197,13 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
             <p className="text-xs text-stone-500">
               L’extraction IA passe par Firebase AI Logic (gratuit). Si vous préférez utiliser votre propre clé API Google Gemini, vous pouvez la renseigner ici (stockée uniquement dans votre navigateur).
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 type="password"
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value)}
                 placeholder="AIzaSy…"
-                className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-xs text-stone-900 focus:border-fresh-500 focus:outline-none"
+                className="min-w-0 flex-1 rounded-xl border border-stone-300 px-3 py-2 text-xs text-stone-900 focus:border-fresh-500 focus:outline-none"
               />
               <button
                 type="button"
@@ -214,30 +211,11 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
                   onSaveGeminiKey(keyInput);
                   setFeedback({ type: 'ok', msg: 'Clé API enregistrée localement.' });
                 }}
-                className="rounded-xl bg-stone-900 px-3.5 py-2 text-xs font-bold text-white hover:bg-stone-800"
+                className="shrink-0 rounded-xl bg-stone-900 px-3.5 py-2 text-xs font-bold text-white hover:bg-stone-800"
               >
                 Enregistrer
               </button>
             </div>
-          </section>
-
-          {/* Exemples */}
-          <section className="flex items-center justify-between rounded-2xl border border-stone-200 p-4">
-            <div>
-              <h3 className="text-sm font-bold text-stone-900">Recettes d’exemple</h3>
-              <p className="text-xs text-stone-500">Ajouter les 4 recettes HelloFresh de démo manquantes.</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                onRestoreSamples();
-                setFeedback({ type: 'ok', msg: 'Recettes d’exemple ajoutées.' });
-              }}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Restaurer
-            </button>
           </section>
 
           {/* Mes autres applications */}

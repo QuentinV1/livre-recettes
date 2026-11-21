@@ -16,7 +16,6 @@ import {
   WeeklyPlan,
   createEmptyWeeklyPlan,
 } from '../types/recipe';
-import { SAMPLE_RECIPES } from '../data/sampleRecipes';
 
 const DB_NAME = 'carnet-hellofresh-db';
 const DB_VERSION = 2;
@@ -229,12 +228,6 @@ export async function loadLocalRecipes(): Promise<Recipe[]> {
     ]);
 
     const isInitialized = localStorage.getItem(LS_INITIALIZED);
-    if (!isInitialized && recipes.length === 0) {
-      await saveLocalRecipesOnly(SAMPLE_RECIPES);
-      localStorage.setItem(LS_INITIALIZED, 'true');
-      return sortRecipesDesc(SAMPLE_RECIPES);
-    }
-
     if (!isInitialized) {
       localStorage.setItem(LS_INITIALIZED, 'true');
     }
@@ -256,16 +249,15 @@ export async function loadLocalRecipes(): Promise<Recipe[]> {
       try {
         return sortRecipesDesc(JSON.parse(raw) as Recipe[]);
       } catch {
-        return sortRecipesDesc(SAMPLE_RECIPES);
+        return [];
       }
     }
     try {
-      localStorage.setItem(LS_RECIPES_FALLBACK, JSON.stringify(SAMPLE_RECIPES));
       localStorage.setItem(LS_INITIALIZED, 'true');
     } catch {
       // ignore quota
     }
-    return sortRecipesDesc(SAMPLE_RECIPES);
+    return [];
   }
 }
 

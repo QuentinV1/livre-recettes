@@ -7,6 +7,10 @@
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
   }
+
+  body {
+    overflow-x: clip;
+  }
 }
 
 /* Custom subtle scrollbars */

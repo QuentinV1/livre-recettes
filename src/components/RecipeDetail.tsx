@@ -180,7 +180,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
 
           {/* Switcher Recto / Verso si les deux existent */}
           {(recipe.imageFront || recipe.imageBack) && recipe.imageBack && (
-            <div className="absolute bottom-3 left-3 flex items-center gap-1 rounded-xl bg-black/60 p-1 backdrop-blur-md">
+            <div className="absolute bottom-3 left-3 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1 rounded-xl bg-black/60 p-1 backdrop-blur-md">
               <button
                 type="button"
                 onClick={() => setActivePhoto('front')}
@@ -206,7 +206,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         </div>
 
         {/* En-tête Recette */}
-        <div className="p-5 sm:p-8">
+        <div className="p-4 sm:p-8">
           <div className="flex flex-wrap items-center gap-2 mb-3">
             {recipe.recipeNumber && (
               <span className="inline-flex items-center rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-bold text-stone-700">
@@ -223,7 +223,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
             ))}
           </div>
 
-          <h1 className="font-display text-2xl font-extrabold tracking-tight text-stone-900 sm:text-3xl">
+          <h1 className="break-words font-display text-2xl font-extrabold tracking-tight text-stone-900 sm:text-3xl">
             {recipe.title}
           </h1>
           {recipe.subtitle && (
@@ -291,9 +291,9 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           </div>
 
           {/* Grille Ingrédients + Étapes */}
-          <div className="mt-8 grid gap-8 lg:grid-cols-12">
+          <div className="mt-8 grid gap-6 sm:gap-8 lg:grid-cols-12">
             {/* Colonne gauche : Ustensiles, Ingrédients, Nutrition, Allergènes */}
-            <section className="lg:col-span-5 space-y-6">
+            <section className="min-w-0 lg:col-span-5 space-y-6">
               {recipe.utensils && recipe.utensils.length > 0 && (
                 <div className="rounded-2xl border border-stone-200/80 bg-stone-50/70 p-4">
                   <h2 className="mb-2 text-xs font-bold uppercase tracking-wider text-stone-600">
@@ -343,8 +343,8 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                           >
                             {checked && <Check className="h-3.5 w-3.5" />}
                           </span>
-                          <span className="flex-1 flex items-baseline justify-between gap-2">
-                            <span>{ing.name}</span>
+                          <span className="min-w-0 flex-1 flex items-baseline justify-between gap-2">
+                            <span className="min-w-0 break-words">{ing.name}</span>
                             {(qty || ing.unit) && (
                               <span className="shrink-0 text-xs font-bold text-fresh-700">
                                 {qty} {ing.unit}
@@ -377,26 +377,28 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                   <h2 className="mb-2.5 text-xs font-bold uppercase tracking-wider text-stone-600">
                     Valeurs nutritionnelles
                   </h2>
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-stone-200 text-stone-500">
-                        <th className="py-1 text-left font-semibold"></th>
-                        <th className="py-1 text-right font-semibold">Par portion</th>
-                        <th className="py-1 text-right font-semibold">Pour 100 g</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-stone-200/60">
-                      {recipe.nutrition.map((row, i) => (
-                        <tr key={i}>
-                          <td className="py-1.5 text-stone-700">{row.label}</td>
-                          <td className="py-1.5 text-right font-semibold text-stone-900">
-                            {row.perServing}
-                          </td>
-                          <td className="py-1.5 text-right text-stone-600">{row.per100g}</td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-stone-200 text-stone-500">
+                          <th className="py-1 text-left font-semibold"></th>
+                          <th className="py-1 text-right font-semibold">Par portion</th>
+                          <th className="py-1 text-right font-semibold">Pour 100 g</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-stone-200/60">
+                        {recipe.nutrition.map((row, i) => (
+                          <tr key={i}>
+                            <td className="py-1.5 text-stone-700">{row.label}</td>
+                            <td className="py-1.5 text-right font-semibold text-stone-900">
+                              {row.perServing}
+                            </td>
+                            <td className="py-1.5 text-right text-stone-600">{row.per100g}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
@@ -405,13 +407,13 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                   <h2 className="mb-1 text-xs font-bold uppercase tracking-wider text-stone-600">
                     Allergènes
                   </h2>
-                  <p className="text-xs leading-relaxed text-stone-600">{recipe.allergens}</p>
+                  <p className="break-words text-xs leading-relaxed text-stone-600">{recipe.allergens}</p>
                 </div>
               )}
             </section>
 
             {/* Étapes cochables */}
-            <section className="lg:col-span-7">
+            <section className="min-w-0 lg:col-span-7">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-display text-lg font-bold text-stone-900">
                   Préparation ({completedStepsCount}/
@@ -455,7 +457,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                         >
                           {done ? <Check className="h-4 w-4" /> : idx + 1}
                         </span>
-                        <div className={`flex-1 space-y-2 ${done ? 'line-through opacity-75' : ''}`}>
+                        <div className={`min-w-0 flex-1 space-y-2 break-words ${done ? 'line-through opacity-75' : ''}`}>
                           {step.title && (
                             <h3 className="font-display text-sm font-bold text-stone-900 sm:text-base">
                               {step.title}

@@ -224,18 +224,18 @@ export const CloudAuthModal: React.FC<CloudAuthModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl sm:p-6"
+        className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl sm:p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between border-b border-stone-200 pb-3">
-          <div className="flex items-center gap-2 font-display text-lg font-bold text-stone-900">
-            <Cloud className="h-5 w-5 text-fresh-600" />
-            <span>Compte Cloud Carnet HelloFresh</span>
+        <div className="mb-4 flex items-center justify-between gap-2 border-b border-stone-200 pb-3">
+          <div className="flex min-w-0 items-center gap-2 font-display text-lg font-bold text-stone-900">
+            <Cloud className="h-5 w-5 shrink-0 text-fresh-600" />
+            <span className="truncate">Compte Cloud Carnet HelloFresh</span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+            className="shrink-0 rounded-xl p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
             aria-label="Fermer la fenêtre Cloud"
           >
             <X className="h-5 w-5" />
@@ -269,7 +269,7 @@ export const CloudAuthModal: React.FC<CloudAuthModalProps> = ({
             </div>
 
             <div>
-              <div className="mb-1.5 flex items-center justify-between">
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
                 <label
                   htmlFor="auth-password"
                   className="text-xs font-bold text-stone-700"

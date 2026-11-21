@@ -42,7 +42,6 @@ import {
   saveGeminiApiKey,
   subscribeCloudState,
 } from './utils/storage';
-import { SAMPLE_RECIPES } from './data/sampleRecipes';
 import { CloudAuthModal } from './components/AuthScreen';
 import { RecipeCard } from './components/RecipeCard';
 import { RecipeDetail } from './components/RecipeDetail';
@@ -301,17 +300,6 @@ export function App() {
     }
   };
 
-  const handleRestoreSamples = async () => {
-    const existingIds = new Set(recipesRef.current.map((r) => String(r.id)));
-    const missing = SAMPLE_RECIPES.filter((s) => !existingIds.has(String(s.id)));
-    if (missing.length === 0) return;
-    const nextRecipes = [...recipesRef.current, ...missing].sort((a, b) =>
-      (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
-    );
-    updateRecipesState(nextRecipes);
-    await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
-  };
-
   const handleSignOut = async () => {
     arreterListenersFirestore();
     await deconnexionFirebase();
@@ -340,7 +328,7 @@ export function App() {
     <div className="min-h-screen bg-cream text-stone-900 flex flex-col">
       {/* Header Desktop & Mobile */}
       <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-2.5 sm:gap-3 sm:px-6 sm:py-3">
           {/* Logo */}
           <button
             type="button"
@@ -348,19 +336,19 @@ export function App() {
               setActiveTab('catalog');
               setSelectedRecipeId(null);
             }}
-            className="flex items-center gap-2.5 text-left"
+            className="flex min-w-0 items-center gap-2 text-left sm:gap-2.5"
           >
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-fresh-600 text-white shadow-sm shadow-fresh-600/25">
-              <UtensilsCrossed className="h-5 w-5" />
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-fresh-600 text-white shadow-sm shadow-fresh-600/25 sm:h-10 sm:w-10">
+              <UtensilsCrossed className="h-4 w-4 sm:h-5 sm:w-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="font-display text-base font-extrabold tracking-tight text-stone-900 sm:text-lg">
+                <span className="truncate font-display text-sm font-extrabold tracking-tight text-stone-900 sm:text-lg">
                   Carnet HelloFresh
                 </span>
                 <span
                   id="header-version-badge"
-                  className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold text-stone-500"
+                  className="hidden rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold text-stone-500 sm:inline-block"
                 >
                   v{APP_VERSION}
                 </span>
@@ -411,7 +399,7 @@ export function App() {
           </nav>
 
           {/* Actions droite */}
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <button
               type="button"
               id="btn-auth-header"
@@ -422,7 +410,7 @@ export function App() {
                   : 'Se connecter au Cloud'
               }
               aria-label="Compte Cloud"
-              className={`inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold transition-colors ${
+              className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-bold transition-colors sm:h-10 sm:px-3 ${
                 user
                   ? cloud.syncStatus === 'error'
                     ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
@@ -435,17 +423,17 @@ export function App() {
               ) : (
                 <Cloud className="h-4 w-4 shrink-0 text-fresh-600" />
               )}
-              <span className="btn-text max-w-[110px] truncate">{authLabel}</span>
+              <span className="btn-text hidden max-w-[110px] truncate sm:inline">{authLabel}</span>
             </button>
 
             <button
               type="button"
               onClick={() => setSettingsOpen(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 hover:text-stone-900"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 hover:text-stone-900 sm:h-10 sm:w-10"
               title="Sauvegarde JSON & Réglages"
               aria-label="Sauvegarde JSON & Réglages"
             >
-              <Settings className="h-5 w-5" />
+              <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
 
             <button
@@ -454,7 +442,7 @@ export function App() {
                 setEditingRecipe(null);
                 setFormModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-fresh-600 px-3.5 py-2.5 text-sm font-bold text-white shadow-sm shadow-fresh-600/20 transition-all hover:bg-fresh-700"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-fresh-600 px-2.5 text-xs font-bold text-white shadow-sm shadow-fresh-600/20 transition-all hover:bg-fresh-700 sm:h-10 sm:px-3.5 sm:text-sm"
             >
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">Ajouter une recette</span>
@@ -465,7 +453,7 @@ export function App() {
       </header>
 
       {/* Contenu Principal */}
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 sm:py-7">
+      <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-3 py-4 pb-24 sm:px-6 sm:py-7 md:pb-7">
         {visibleSyncError && (
           <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
             <span className="flex items-center gap-2">
@@ -649,7 +637,7 @@ export function App() {
       </main>
 
       {/* Barre de navigation Mobile (en bas) */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-stone-200 bg-white/95 py-2 backdrop-blur-md md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-stone-200 bg-white/95 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur-md md:hidden">
         <button
           type="button"
           onClick={() => {
@@ -738,7 +726,6 @@ export function App() {
             setGeminiApiKey(k);
           }}
           onImportBackup={handleImportBackup}
-          onRestoreSamples={handleRestoreSamples}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -750,7 +737,7 @@ export function App() {
           onClick={() => setQuickPlanRecipe(null)}
         >
           <div
-            className="w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl"
+            className="flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl sm:pb-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">

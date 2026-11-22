@@ -138,7 +138,7 @@ export function formatFirestoreError(err: unknown): string {
   const code = (err as { code?: string })?.code;
   const message = (err as { message?: string })?.message;
   if (code === 'permission-denied') {
-    return 'Accès Firestore refusé (vérifiez que votre e-mail est bien vérifié et autorisé).';
+    return 'Accès Firestore refusé (permissions insuffisantes ou données invalides).';
   }
   return message || 'Erreur de synchronisation Firestore';
 }

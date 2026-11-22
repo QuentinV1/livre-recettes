@@ -1,3 +1,11 @@
+function encodeCanvasOptimized(canvas: HTMLCanvasElement, quality: number): string {
+  const webp = canvas.toDataURL('image/webp', quality);
+  if (webp.startsWith('data:image/webp')) {
+    return webp;
+  }
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
 /**
  * Compresses an uploaded image file on the client side using HTML5 Canvas.
  * Resizes to a max dimension (default 1200px) and encodes as JPEG.
@@ -44,6 +52,79 @@ export async function compressImageFile(
       img.src = reader.result as string;
     };
     reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Compresses a standalone dish photo file for Firestore storage (WebP/JPEG, max 720px).
+ */
+export async function compressDishImageFile(
+  file: File,
+  maxDimension = 720,
+  quality = 0.74
+): Promise<string> {
+  const jpegDataUrl = await compressImageFile(file, maxDimension, quality);
+  return cropImageByNormalizedBox(jpegDataUrl, [0, 0, 1000, 1000], maxDimension, quality);
+}
+
+/**
+ * Crops an image Data URL using normalized [ymin, xmin, ymax, xmax] coordinates (0..1000)
+ * and compresses it (WebP if supported, otherwise JPEG) for lightweight Firestore storage.
+ */
+export async function cropImageByNormalizedBox(
+  dataUrl: string,
+  box: [number, number, number, number],
+  maxDimension = 720,
+  quality = 0.74
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('Impossible de charger l’image pour le recadrage.'));
+    img.onload = () => {
+      const [rawYMin, rawXMin, rawYMax, rawXMax] = box;
+      const ymin = Math.max(0, Math.min(1000, rawYMin));
+      const xmin = Math.max(0, Math.min(1000, rawXMin));
+      const ymax = Math.max(0, Math.min(1000, rawYMax));
+      const xmax = Math.max(0, Math.min(1000, rawXMax));
+
+      if (ymax - ymin < 50 || xmax - xmin < 50) {
+        reject(new Error('Zone de recadrage du plat invalide ou trop petite.'));
+        return;
+      }
+
+      const sx = Math.round((xmin / 1000) * img.width);
+      const sy = Math.round((ymin / 1000) * img.height);
+      const sw = Math.max(1, Math.round(((xmax - xmin) / 1000) * img.width));
+      const sh = Math.max(1, Math.round(((ymax - ymin) / 1000) * img.height));
+
+      let targetW = sw;
+      let targetH = sh;
+      if (targetW > maxDimension || targetH > maxDimension) {
+        if (targetW >= targetH) {
+          targetH = Math.round((targetH * maxDimension) / targetW);
+          targetW = maxDimension;
+        } else {
+          targetW = Math.round((targetW * maxDimension) / targetH);
+          targetH = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas 2D indisponible.'));
+        return;
+      }
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, targetW, targetH);
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH);
+
+      resolve(encodeCanvasOptimized(canvas, quality));
+    };
+    img.src = dataUrl;
   });
 }
 

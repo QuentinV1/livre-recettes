@@ -22,9 +22,10 @@ import { CookingModeModal, scaleQuantity } from './CookingModeModal';
 interface RecipeDetailProps {
   recipe: Recipe;
   initialServings?: number;
+  backLabel?: string;
   onBack: () => void;
   onEdit: (recipe: Recipe) => void;
-  onDelete: (id: string) => void;
+  onDelete?: (id: string) => void;
   onToggleWeekly: (id: string) => void;
   onPlanRecipe: (recipe: Recipe) => void;
 }
@@ -32,6 +33,7 @@ interface RecipeDetailProps {
 export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   recipe,
   initialServings,
+  backLabel = 'Catalogue',
   onBack,
   onEdit,
   onDelete,
@@ -82,7 +84,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
           className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm font-semibold text-stone-700 shadow-sm hover:bg-stone-50"
         >
           <ArrowLeft className="h-4 w-4" />
-          Catalogue
+          {backLabel}
         </button>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -119,7 +121,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
             <span className="hidden sm:inline">Modifier</span>
           </button>
 
-          {!confirmDelete ? (
+          {onDelete && (!confirmDelete ? (
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
@@ -146,7 +148,7 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
                 Non
               </button>
             </div>
-          )}
+          ))}
         </div>
       </div>
 

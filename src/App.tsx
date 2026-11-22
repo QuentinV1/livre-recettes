@@ -32,7 +32,6 @@ import {
   arreterListenersFirestore,
   cloudState as initialCloudState,
   CloudState,
-  deleteLocalPhotoById,
   forcerSyncCloud,
   loadGeminiApiKey,
   loadLocalRecipes,
@@ -220,7 +219,6 @@ export function App() {
 
   const handleDeleteRecipe = async (id: string) => {
     const nextRecipes = recipesRef.current.filter((r) => r.id !== id);
-    await deleteLocalPhotoById(id);
 
     const nextPlan = { ...weeklyPlanRef.current };
     for (const d of DAYS_OF_WEEK) {
@@ -474,6 +472,26 @@ export function App() {
           <div className="flex h-64 items-center justify-center text-sm font-medium text-stone-500">
             Chargement de votre livre de recettes…
           </div>
+        ) : selectedRecipe ? (
+          <RecipeDetail
+            recipe={selectedRecipe}
+            initialServings={selectedRecipeInitialServings}
+            backLabel={activeTab === 'planner' ? 'Semaine' : 'Catalogue'}
+            onBack={() => {
+              setSelectedRecipeId(null);
+              setSelectedRecipeInitialServings(undefined);
+            }}
+            onEdit={(rec) => {
+              setEditingRecipe(rec);
+              setFormModalOpen(true);
+            }}
+            onDelete={activeTab === 'catalog' ? handleDeleteRecipe : undefined}
+            onToggleWeekly={(id) => handleToggleWeekly(id)}
+            onPlanRecipe={(rec) => {
+              setQuickPlanServings(rec.servings || 2);
+              setQuickPlanRecipe(rec);
+            }}
+          />
         ) : activeTab === 'planner' ? (
           <WeeklyPlanner
             recipes={recipes}
@@ -484,26 +502,6 @@ export function App() {
             onOpenRecipe={(rec, plannedServings) => {
               setSelectedRecipeInitialServings(plannedServings);
               setSelectedRecipeId(rec.id);
-              setActiveTab('catalog');
-            }}
-          />
-        ) : selectedRecipe ? (
-          <RecipeDetail
-            recipe={selectedRecipe}
-            initialServings={selectedRecipeInitialServings}
-            onBack={() => {
-              setSelectedRecipeId(null);
-              setSelectedRecipeInitialServings(undefined);
-            }}
-            onEdit={(rec) => {
-              setEditingRecipe(rec);
-              setFormModalOpen(true);
-            }}
-            onDelete={handleDeleteRecipe}
-            onToggleWeekly={(id) => handleToggleWeekly(id)}
-            onPlanRecipe={(rec) => {
-              setQuickPlanServings(rec.servings || 2);
-              setQuickPlanRecipe(rec);
             }}
           />
         ) : (

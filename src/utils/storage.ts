@@ -132,14 +132,12 @@ const ALLOWED_RECIPE_FIELDS = [
   'updatedAt',
 ] as const;
 
-const MAX_CLOUD_IMAGE_CHARS = 20000;
+const MAX_CLOUD_IMAGE_CHARS = 850000;
 
 function sanitizeImageForCloud(img?: string | null): string | null {
   if (!img || typeof img !== 'string') return null;
-  // Les photos binaires/base64 lourdes restent uniquement en local dans IndexedDB (plan Spark, limite 1 Mo/doc).
-  // Seules les illustrations SVG légères (<= 20 Ko) sont conservées dans Firestore.
+  // Option 1 : la photo du plat compressée (WebP/JPEG <= 850 Ko) ou une URL externe (ex. R2) est stockée directement dans Firestore.
   if (img.length > MAX_CLOUD_IMAGE_CHARS) return null;
-  if (/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(img)) return null;
   return img;
 }
 
@@ -152,18 +150,13 @@ export function prepareRecipeForFirestore(recipe: Recipe): Record<string, unknow
     } else if (key === 'imageFront') {
       raw.imageFront = sanitizeImageForCloud(recipe.imageFront);
     } else if (key === 'imageBack') {
-      raw.imageBack = sanitizeImageForCloud(recipe.imageBack);
+      // Les photos verso ne sont jamais persistées (utilisées uniquement pour l'analyse Gemini Vision).
+      raw.imageBack = null;
     } else {
       raw[key] = source[key] !== undefined ? source[key] : null;
     }
   }
   return cleanForFirestore(raw);
-}
-
-interface PhotoRecord {
-  id: string;
-  imageFront?: string;
-  imageBack?: string;
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -187,28 +180,6 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-async function loadLocalPhotosMap(): Promise<Map<string, PhotoRecord>> {
-  const map = new Map<string, PhotoRecord>();
-  try {
-    const database = await openDB();
-    const records = await new Promise<PhotoRecord[]>((resolve, reject) => {
-      const tx = database.transaction(STORE_PHOTOS, 'readonly');
-      const store = tx.objectStore(STORE_PHOTOS);
-      const req = store.getAll();
-      req.onsuccess = () => resolve((req.result as PhotoRecord[]) || []);
-      req.onerror = () => reject(req.error);
-    });
-    for (const r of records) {
-      if (r && r.id) {
-        map.set(String(r.id), r);
-      }
-    }
-  } catch {
-    // ignore if IDB blocked
-  }
-  return map;
-}
-
 function sortRecipesDesc(list: Recipe[]): Recipe[] {
   return [...list].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
 }
@@ -216,31 +187,25 @@ function sortRecipesDesc(list: Recipe[]): Recipe[] {
 export async function loadLocalRecipes(): Promise<Recipe[]> {
   try {
     const database = await openDB();
-    const [recipes, photosMap] = await Promise.all([
-      new Promise<Recipe[]>((resolve, reject) => {
-        const tx = database.transaction(STORE_RECIPES, 'readonly');
-        const store = tx.objectStore(STORE_RECIPES);
-        const req = store.getAll();
-        req.onsuccess = () => resolve((req.result as Recipe[]) || []);
-        req.onerror = () => reject(req.error);
-      }),
-      loadLocalPhotosMap(),
-    ]);
+    const recipes = await new Promise<Recipe[]>((resolve, reject) => {
+      const tx = database.transaction(STORE_RECIPES, 'readonly');
+      const store = tx.objectStore(STORE_RECIPES);
+      const req = store.getAll();
+      req.onsuccess = () => resolve((req.result as Recipe[]) || []);
+      req.onerror = () => reject(req.error);
+    });
 
     const isInitialized = localStorage.getItem(LS_INITIALIZED);
     if (!isInitialized) {
       localStorage.setItem(LS_INITIALIZED, 'true');
     }
 
-    const hydrated = recipes.map((r) => {
-      const photo = photosMap.get(String(r.id));
-      return {
-        ...r,
-        id: String(r.id),
-        imageFront: r.imageFront || photo?.imageFront || undefined,
-        imageBack: r.imageBack || photo?.imageBack || undefined,
-      };
-    });
+    const hydrated = recipes.map((r) => ({
+      ...r,
+      id: String(r.id),
+      imageFront: r.imageFront || undefined,
+      imageBack: undefined,
+    }));
 
     return sortRecipesDesc(hydrated);
   } catch {
@@ -265,21 +230,24 @@ async function saveLocalRecipesOnly(recipes: Recipe[]): Promise<void> {
   try {
     const database = await openDB();
     await new Promise<void>((resolve, reject) => {
-      const tx = database.transaction([STORE_RECIPES, STORE_PHOTOS], 'readwrite');
+      const stores = database.objectStoreNames.contains(STORE_PHOTOS)
+        ? [STORE_RECIPES, STORE_PHOTOS]
+        : [STORE_RECIPES];
+      const tx = database.transaction(stores, 'readwrite');
       const recipeStore = tx.objectStore(STORE_RECIPES);
-      const photoStore = tx.objectStore(STORE_PHOTOS);
 
       recipeStore.clear();
+      if (database.objectStoreNames.contains(STORE_PHOTOS)) {
+        // Purge de l'ancien cache local de photos recto/verso
+        tx.objectStore(STORE_PHOTOS).clear();
+      }
       for (const r of recipes) {
-        const normalized: Recipe = { ...r, id: String(r.id) };
+        const normalized: Recipe = {
+          ...r,
+          id: String(r.id),
+          imageBack: undefined,
+        };
         recipeStore.put(normalized);
-        if (normalized.imageFront || normalized.imageBack) {
-          photoStore.put({
-            id: String(normalized.id),
-            imageFront: normalized.imageFront,
-            imageBack: normalized.imageBack,
-          });
-        }
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -291,26 +259,13 @@ async function saveLocalRecipesOnly(recipes: Recipe[]): Promise<void> {
   try {
     const lightweight = recipes.map((r) => ({
       ...r,
-      imageFront: sanitizeImageForCloud(r.imageFront) ?? undefined,
-      imageBack: sanitizeImageForCloud(r.imageBack) ?? undefined,
+      imageFront:
+        r.imageFront && r.imageFront.length <= 20000 ? r.imageFront : undefined,
+      imageBack: undefined,
     }));
     localStorage.setItem(LS_RECIPES_FALLBACK, JSON.stringify(lightweight));
   } catch {
     // ignore localStorage quota errors when IDB is primary
-  }
-}
-
-export async function deleteLocalPhotoById(recipeId: string): Promise<void> {
-  try {
-    const database = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = database.transaction(STORE_PHOTOS, 'readwrite');
-      tx.objectStore(STORE_PHOTOS).delete(String(recipeId));
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch {
-    // ignore
   }
 }
 
@@ -342,11 +297,9 @@ function hasAnyPlannedMeal(plan: WeeklyPlan): boolean {
 
 function normalizeRecipeFromFirestore(
   data: Record<string, unknown>,
-  docId: string,
-  photosMap: Map<string, PhotoRecord>
+  docId: string
 ): Recipe {
   const id = String(data.id || docId);
-  const localPhoto = photosMap.get(id);
   const strOrUndef = (v: unknown): string | undefined =>
     typeof v === 'string' && v.length > 0 ? v : undefined;
 
@@ -371,8 +324,8 @@ function normalizeRecipeFromFirestore(
       ? (data.nutrition as Recipe['nutrition'])
       : undefined,
     allergens: strOrUndef(data.allergens),
-    imageFront: localPhoto?.imageFront || strOrUndef(data.imageFront),
-    imageBack: localPhoto?.imageBack || strOrUndef(data.imageBack),
+    imageFront: strOrUndef(data.imageFront),
+    imageBack: undefined,
     notes: strOrUndef(data.notes),
     isWeekly: Boolean(data.isWeekly),
     createdAt:
@@ -552,10 +505,9 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
           return;
         }
 
-        const photosMap = await loadLocalPhotosMap();
         const serverList = sortRecipesDesc(
           snap.docs.map((d) =>
-            normalizeRecipeFromFirestore(d.data() as Record<string, unknown>, d.id, photosMap)
+            normalizeRecipeFromFirestore(d.data() as Record<string, unknown>, d.id)
           )
         );
 

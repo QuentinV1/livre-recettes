@@ -20,7 +20,7 @@ import {
   RecipeStep,
   SUGGESTED_TAGS,
 } from '../types/recipe';
-import { compressImageFile } from '../utils/image';
+import { compressDishImageFile, compressImageFile } from '../utils/image';
 import {
   extractRecipeWithGeminiVision,
   extractRecipeWithTesseract,
@@ -78,8 +78,9 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   const [allergens, setAllergens] = useState(initialRecipe?.allergens ?? '');
   const [notes, setNotes] = useState(initialRecipe?.notes ?? '');
   const [isWeekly, setIsWeekly] = useState(initialRecipe?.isWeekly ?? false);
-  const [imageFront, setImageFront] = useState<string | undefined>(initialRecipe?.imageFront);
-  const [imageBack, setImageBack] = useState<string | undefined>(initialRecipe?.imageBack);
+  const [dishImage, setDishImage] = useState<string | undefined>(initialRecipe?.imageFront);
+  const [scanFront, setScanFront] = useState<string | undefined>(undefined);
+  const [scanBack, setScanBack] = useState<string | undefined>(undefined);
 
   // Assistant OCR / Import texte
   const [importTab, setImportTab] = useState<'ocr' | 'paste'>('ocr');
@@ -91,20 +92,25 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
 
   const handleImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
-    side: 'front' | 'back'
+    side: 'front' | 'back' | 'dish'
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressed = await compressImageFile(file, 1200, 0.78);
-      if (side === 'front') setImageFront(compressed);
-      else setImageBack(compressed);
+      if (side === 'dish') {
+        const compressed = await compressDishImageFile(file);
+        setDishImage(compressed);
+      } else {
+        const compressed = await compressImageFile(file, 1200, 0.78);
+        if (side === 'front') setScanFront(compressed);
+        else setScanBack(compressed);
+      }
     } catch (err) {
       setOcrError(err instanceof Error ? err.message : 'Erreur lors de la compression image.');
     }
   };
 
-  const applyDraft = (draft: ReturnType<typeof parseRecipeText>) => {
+  const applyDraft = (draft: Partial<ReturnType<typeof parseRecipeText>> & { dishImage?: string }) => {
     if (draft.recipeNumber) setRecipeNumber(draft.recipeNumber);
     if (draft.title) setTitle(draft.title);
     if (draft.subtitle) setSubtitle(draft.subtitle);
@@ -117,19 +123,20 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
     if (draft.utensils && draft.utensils.length > 0) {
       setUtensilsText(draft.utensils.join(', '));
     }
-    if (draft.ingredients.length > 0) setIngredients(draft.ingredients);
+    if (draft.ingredients && draft.ingredients.length > 0) setIngredients(draft.ingredients);
     if (draft.stepDetails && draft.stepDetails.length > 0) {
       setStepDetails(draft.stepDetails);
-    } else if (draft.steps.length > 0) {
+    } else if (draft.steps && draft.steps.length > 0) {
       setStepDetails(draft.steps.map((s) => ({ bullets: [s] })));
     }
     if (draft.nutrition && draft.nutrition.length > 0) setNutrition(draft.nutrition);
     if (draft.allergens) setAllergens(draft.allergens);
     if (draft.notes) setNotes(draft.notes);
+    if (draft.dishImage) setDishImage(draft.dishImage);
   };
 
   const handleRunTesseract = async () => {
-    if (!imageBack && !imageFront) {
+    if (!scanBack && !scanFront) {
       setOcrError('Ajoutez d’abord au moins une photo (recto et/ou verso) pour lancer la lecture OCR.');
       return;
     }
@@ -137,7 +144,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
     setOcrLoading(true);
     setOcrStatus('Initialisation de Tesseract OCR…');
     try {
-      const draft = await extractRecipeWithTesseract(imageFront, imageBack, (pct, label) => {
+      const draft = await extractRecipeWithTesseract(scanFront, scanBack, (pct, label) => {
         setOcrStatus(`${label} (${pct}%)`);
       });
       if (draft.rawText) setPastedText(draft.rawText);
@@ -154,17 +161,23 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   };
 
   const handleRunGeminiVision = async () => {
-    if (!imageBack && !imageFront) {
+    if (!scanBack && !scanFront) {
       setOcrError('Ajoutez au moins une photo (verso ou recto) à analyser.');
       return;
     }
     setOcrError('');
     setOcrLoading(true);
-    setOcrStatus('Analyse intelligente de la fiche via Gemini Vision…');
+    setOcrStatus('Analyse de la fiche et extraction de la photo du plat via Gemini Vision…');
     try {
-      const draft = await extractRecipeWithGeminiVision(geminiApiKey, imageFront, imageBack);
+      const draft = await extractRecipeWithGeminiVision(geminiApiKey, scanFront, scanBack);
       applyDraft(draft);
-      setOcrStatus('Recette extraite avec succès !');
+      setScanFront(undefined);
+      setScanBack(undefined);
+      setOcrStatus(
+        draft.dishImage
+          ? 'Recette et photo du plat extraites ! Les scans recto/verso ont été libérés.'
+          : 'Recette extraite avec succès ! Les scans recto/verso ont été libérés.'
+      );
     } catch (err) {
       setOcrError(err instanceof Error ? err.message : 'Erreur Gemini Vision.');
     } finally {
@@ -246,8 +259,8 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
       allergens: allergens.trim() || undefined,
       notes: notes.trim() || undefined,
       isWeekly,
-      imageFront,
-      imageBack,
+      imageFront: dishImage,
+      imageBack: undefined,
       createdAt: initialRecipe?.createdAt ?? now,
       updatedAt: now,
     };
@@ -275,24 +288,27 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 space-y-5 sm:p-6 sm:space-y-6">
-          {/* Photos Recto & Verso */}
+          {/* Scan Recto & Verso (temporaire pour Gemini Vision) */}
           <section className="rounded-2xl border border-stone-200 bg-stone-50/70 p-4">
-            <h3 className="mb-3 text-sm font-bold text-stone-800 flex items-center gap-2">
+            <h3 className="mb-1 text-sm font-bold text-stone-800 flex items-center gap-2">
               <ImageIcon className="h-4 w-4 text-fresh-600" />
-              Photos de la fiche (compression automatique)
+              Scan de la fiche (temporaire pour Gemini Vision)
             </h3>
+            <p className="mb-3 text-xs text-stone-500">
+              Les photos recto/verso ne sont pas enregistrées : elles servent uniquement à extraire le texte et à découper la photo du plat.
+            </p>
             <div className="grid gap-4 sm:grid-cols-2">
               {/* Recto */}
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-stone-600">
-                  Recto — Photo du plat
+                  Recto — Fiche & photo du plat
                 </label>
-                {imageFront ? (
+                {scanFront ? (
                   <div className="relative aspect-[16/10] overflow-hidden rounded-xl border border-stone-200 bg-white">
-                    <img src={imageFront} alt="Recto" className="h-full w-full object-cover" />
+                    <img src={scanFront} alt="Scan Recto" className="h-full w-full object-cover" />
                     <button
                       type="button"
-                      onClick={() => setImageFront(undefined)}
+                      onClick={() => setScanFront(undefined)}
                       className="absolute right-2 top-2 rounded-lg bg-black/65 px-2 py-1 text-xs font-semibold text-white hover:bg-black/80"
                     >
                       Retirer
@@ -300,7 +316,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
                   </div>
                 ) : (
                   <div className="flex aspect-[16/10] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-stone-300 bg-white p-3 text-stone-500">
-                    <span className="text-xs font-medium text-stone-500">Photo recto du plat</span>
+                    <span className="text-xs font-medium text-stone-500">Scan recto (temporaire)</span>
                     <div className="flex flex-wrap items-center justify-center gap-2">
                       <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-700 transition-colors hover:border-fresh-400 hover:bg-fresh-50 hover:text-fresh-700">
                         <Upload className="h-3.5 w-3.5" />
@@ -333,12 +349,12 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
                 <label className="mb-1.5 block text-xs font-semibold text-stone-600">
                   Verso — Fiche recette (texte)
                 </label>
-                {imageBack ? (
+                {scanBack ? (
                   <div className="relative aspect-[16/10] overflow-hidden rounded-xl border border-stone-200 bg-white">
-                    <img src={imageBack} alt="Verso" className="h-full w-full object-cover" />
+                    <img src={scanBack} alt="Scan Verso" className="h-full w-full object-cover" />
                     <button
                       type="button"
-                      onClick={() => setImageBack(undefined)}
+                      onClick={() => setScanBack(undefined)}
                       className="absolute right-2 top-2 rounded-lg bg-black/65 px-2 py-1 text-xs font-semibold text-white hover:bg-black/80"
                     >
                       Retirer
@@ -346,7 +362,7 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
                   </div>
                 ) : (
                   <div className="flex aspect-[16/10] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-stone-300 bg-white p-3 text-stone-500">
-                    <span className="text-xs font-medium text-stone-500">Photo verso de la fiche</span>
+                    <span className="text-xs font-medium text-stone-500">Scan verso (temporaire)</span>
                     <div className="flex flex-wrap items-center justify-center gap-2">
                       <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-700 transition-colors hover:border-fresh-400 hover:bg-fresh-50 hover:text-fresh-700">
                         <Upload className="h-3.5 w-3.5" />
@@ -373,6 +389,50 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Photo du plat enregistrée (extraite ou manuelle) */}
+            <div className="mt-4 rounded-xl border border-stone-200 bg-white p-3.5">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-stone-700">
+                    Photo du plat enregistrée (Firestore)
+                  </h4>
+                  <p className="text-[11px] text-stone-500">
+                    Seule cette photo recadrée et compressée est sauvegardée en base de données.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-semibold text-stone-700 hover:border-fresh-400 hover:bg-fresh-50 hover:text-fresh-700">
+                    <Upload className="h-3.5 w-3.5" />
+                    {dishImage ? 'Remplacer' : 'Importer photo'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleImageUpload(e, 'dish')}
+                      className="hidden"
+                    />
+                  </label>
+                  {dishImage && (
+                    <button
+                      type="button"
+                      onClick={() => setDishImage(undefined)}
+                      className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+                    >
+                      Supprimer
+                    </button>
+                  )}
+                </div>
+              </div>
+              {dishImage ? (
+                <div className="relative aspect-[16/9] max-h-48 w-full overflow-hidden rounded-lg border border-stone-200 bg-stone-100">
+                  <img src={dishImage} alt="Photo du plat" className="h-full w-full object-cover" />
+                </div>
+              ) : (
+                <div className="flex h-20 items-center justify-center rounded-lg border border-dashed border-stone-200 bg-stone-50 text-xs text-stone-400">
+                  Aucune photo de plat pour le moment — elle sera extraite automatiquement du recto par Gemini Vision.
+                </div>
+              )}
             </div>
 
             {/* Assistant Extraction OCR / Texte */}

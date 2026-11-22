@@ -79,6 +79,7 @@ if (isFirebaseConfigured) {
         localCache: persistentLocalCache({
           tabManager: persistentMultipleTabManager(),
         }),
+        experimentalAutoDetectLongPolling: true,
         ignoreUndefinedProperties: true,
       });
     } catch {

@@ -1,5 +1,6 @@
 import { getAI, getGenerativeModel, GoogleAIBackend, type Part } from 'firebase/ai';
 import { app } from '../lib/firebase';
+import { cropImageByNormalizedBox } from './image';
 import {
   Ingredient,
   NutritionRow,
@@ -23,6 +24,7 @@ export interface ParsedRecipeDraft {
   allergens?: string;
   notes?: string;
   rawText?: string;
+  dishImage?: string;
 }
 
 function makeId(prefix = 'ing'): string {
@@ -835,7 +837,7 @@ export async function extractRecipeWithGeminiVision(
     {
       text: `Analyse ces photos d'une fiche recette HelloFresh (recto et/ou verso) et extrais un JSON strict sans markdown.
 Structure connue de la fiche :
-- RECTO : en haut le numéro ("Recette XXX"), le titre, le sous-titre, les tags colorés (ex: Épicé, Végétarien), et le temps de préparation (ex: "À table dans : 35 - 45 Min"). À droite la liste visuelle des ingrédients de la box.
+- RECTO : en haut le numéro ("Recette XXX"), le titre, le sous-titre, les tags colorés (ex: Épicé, Végétarien), et le temps de préparation (ex: "À table dans : 35 - 45 Min"). En grand au centre/gauche, la photo du plat cuisiné. À droite la liste visuelle des ingrédients de la box.
 - VERSO colonne gauche : "Mes ustensiles", "Ingrédients pour X personnes" (dans la box), "À ajouter vous-même" (fromPantry: true), "Valeurs nutritionnelles" (Par portion / Pour 100 g), et "Allergènes".
 - VERSO partie droite : grille des étapes (généralement 6). Chaque étape a un titre, des sous-étapes (bullet points) et parfois "L'ASTUCE DU CHEF".
 
@@ -848,6 +850,7 @@ Retourne exactement ce JSON valide en français :
   "prepTimeMinutes": 40,
   "servings": 2,
   "tags": ["épicé", "végétarien"],
+  "dishBox": [220, 40, 950, 680],
   "utensils": ["Bol", "Sauteuse"],
   "ingredients": [
     { "name": "Nom ingrédient", "quantity": "150", "unit": "g", "fromPantry": false },
@@ -864,7 +867,8 @@ Retourne exactement ce JSON valide en français :
     { "label": "Énergie (kJ/kcal)", "perServing": "3021 / 722", "per100g": "616 / 147" }
   ],
   "allergens": "Texte des allergènes"
-}`,
+}
+Pour "dishBox" : indique les coordonnées normalisées [ymin, xmin, ymax, xmax] (entiers de 0 à 1000) encadrant uniquement la grande photo du plat cuisiné sur la première image (recto), sans inclure le titre ni la colonne des ingrédients. Mets null si aucune photo de plat n'est visible.`,
     },
   ];
 
@@ -895,20 +899,30 @@ Retourne exactement ce JSON valide en français :
 
     let lastAiError: unknown;
     for (const modelName of models) {
-      try {
-        const model = getGenerativeModel(ai, {
-          model: modelName,
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.15,
-          },
-        });
-        const res = await model.generateContent(aiParts);
-        rawJson = res.response.text() || '{}';
-        break;
-      } catch (err) {
-        lastAiError = err;
+      const model = getGenerativeModel(ai, {
+        model: modelName,
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.15,
+        },
+      });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await model.generateContent(aiParts);
+          rawJson = res.response.text() || '{}';
+          break;
+        } catch (err) {
+          lastAiError = err;
+          const msg = err instanceof Error ? err.message : String(err);
+          const isTransient = /\b(500|503|429)\b|internal|unavailable|overloaded|network/i.test(msg);
+          if (isTransient && attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+            continue;
+          }
+          break;
+        }
       }
+      if (rawJson) break;
     }
     if (!rawJson) {
       throw new Error(
@@ -993,6 +1007,23 @@ Retourne exactement ce JSON valide en français :
         ? parsed.steps.map((s: unknown) => String(s))
         : [];
 
+  let dishImage: string | undefined;
+  if (
+    rectoDataUrl &&
+    Array.isArray(parsed.dishBox) &&
+    parsed.dishBox.length === 4 &&
+    parsed.dishBox.every((n: unknown) => typeof n === 'number' && Number.isFinite(n))
+  ) {
+    try {
+      dishImage = await cropImageByNormalizedBox(
+        rectoDataUrl,
+        parsed.dishBox as [number, number, number, number]
+      );
+    } catch {
+      // Si le recadrage échoue, on conserve tout de même l'extraction texte de la recette
+    }
+  }
+
   return {
     recipeNumber: parsed.recipeNumber ? String(parsed.recipeNumber) : undefined,
     title: parsed.title || undefined,
@@ -1025,5 +1056,6 @@ Retourne exactement ce JSON valide en français :
         }))
       : undefined,
     allergens: parsed.allergens ? String(parsed.allergens) : undefined,
+    dishImage,
   };
 }

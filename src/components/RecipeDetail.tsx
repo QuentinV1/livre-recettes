@@ -623,6 +623,12 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         </div>
       </div>
 
+      {recipe.ownerName && (
+        <p className="mt-3 px-2 text-right text-[11px] font-medium text-stone-400">
+          Ajoutée par {recipe.ownerName}
+        </p>
+      )}
+
       {/* Mode Cuisine pas à pas */}
       {cookingModeOpen && (
         <CookingModeModal

@@ -2,13 +2,20 @@ import React, { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   AlertCircle,
+  CalendarDays,
+  Camera,
   CheckCircle2,
+  ChefHat,
   Cloud,
   Lock,
+  LogIn,
   LogOut,
   Mail,
   RefreshCw,
   Shield,
+  ShoppingBasket,
+  UserPlus,
+  WifiOff,
   X,
 } from 'lucide-react';
 import {
@@ -458,6 +465,7 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({
   onSignOut,
   onRetryAccess,
 }) => {
+  const [modeState, setModeState] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -522,224 +530,266 @@ export const AuthGateScreen: React.FC<AuthGateScreenProps> = ({
     }
   };
 
-  if (mode === 'loading') {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-stone-50 px-4">
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-fresh-600 border-t-transparent" />
-        <p className="mt-4 text-sm font-medium text-stone-600">
-          Vérification de votre accès…
-        </p>
-      </div>
-    );
-  }
-
-  if (mode === 'unauthorized') {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-stone-50 p-4">
-        <div className="w-full max-w-md rounded-3xl border border-stone-200 bg-white p-6 shadow-xl">
-          <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-red-600">
-              <Shield className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="font-display text-lg font-bold text-stone-900">
-                Accès non autorisé
-              </h1>
-              <p className="text-xs text-stone-500">Carnet HelloFresh</p>
-            </div>
-          </div>
-
-          <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-3.5 text-xs leading-relaxed text-red-800">
-            <p className="font-semibold">
-              Votre compte n&apos;est pas autorisé à accéder à cette application.
-            </p>
-            {userEmail && (
-              <p className="mt-1.5 break-all text-red-700">
-                Compte connecté : <span className="font-bold">{userEmail}</span>
-              </p>
-            )}
-            <p className="mt-1.5 text-red-700/90">
-              Contactez un administrateur pour demander l&apos;accès ou connectez-vous avec un autre
-              compte autorisé.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            {onRetryAccess && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  try {
-                    await onRetryAccess();
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-bold text-stone-800 transition-colors hover:bg-stone-50 disabled:opacity-60"
-              >
-                <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
-                Vérifier à nouveau
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await onSignOut();
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
-            >
-              <LogOut className="h-4 w-4" />
-              Se déconnecter / Changer de compte
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const highlights = [
+    {
+      icon: Camera,
+      title: 'Import photo & OCR',
+      desc: 'Numérise tes fiches recto/verso avec Gemini ou OCR locale.',
+    },
+    {
+      icon: CalendarDays,
+      title: 'Planning Midi & Soir',
+      desc: 'Planifie ta semaine et adapte les quantités au nombre de parts.',
+    },
+    {
+      icon: ShoppingBasket,
+      title: 'Liste de courses auto',
+      desc: 'Ingrédients agrégés automatiquement pour toute la semaine.',
+    },
+  ];
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-stone-50 p-4">
-      <div className="w-full max-w-md rounded-3xl border border-stone-200 bg-white p-6 shadow-xl">
-        <div className="mb-5 flex items-center gap-3 border-b border-stone-200 pb-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-fresh-50 text-fresh-600">
-            <Cloud className="h-6 w-6" />
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-emerald-50/40 to-slate-100 p-4 sm:p-6">
+      <div className="grid w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-xl lg:grid-cols-12">
+        {/* Panneau éditorial */}
+        <div className="relative flex flex-col justify-between bg-gradient-to-br from-stone-950 via-emerald-950 to-fresh-700 p-7 text-white lg:col-span-6 lg:p-10">
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm">
+                <ChefHat className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <p className="text-xl font-extrabold tracking-tight">Carnet HelloFresh</p>
+                <p className="text-xs text-emerald-100/80">Catalogue &amp; Planning semaine</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h1 className="text-2xl font-bold leading-tight sm:text-3xl">
+                Organise tes recettes et tes menus de la semaine.
+              </h1>
+              <p className="text-sm text-emerald-100/80">
+                Synchronisé en temps réel sur tous tes appareils et accessible en cuisine même hors-ligne.
+              </p>
+            </div>
+
+            <div className="hidden space-y-3 pt-2 lg:block">
+              {highlights.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div
+                    key={item.title}
+                    className="flex items-start gap-3 rounded-2xl bg-white/10 p-3.5 ring-1 ring-white/10 backdrop-blur-sm"
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/15">
+                      <Icon className="h-4 w-4 text-emerald-100" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-white">{item.title}</p>
+                      <p className="text-xs text-emerald-100/80">{item.desc}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div>
-            <h1 className="font-display text-lg font-bold text-stone-900">
-              Carnet HelloFresh
-            </h1>
-            <p className="text-xs text-stone-500">
-              Connexion requise pour accéder à l&apos;application
-            </p>
+
+          <div className="mt-6 hidden items-center gap-2 text-xs text-emerald-100/70 lg:flex">
+            <WifiOff className="h-3.5 w-3.5" />
+            <span>Mode cuisine pas-à-pas &amp; hors-ligne inclus</span>
           </div>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="gate-auth-email" className="mb-1.5 block text-xs font-bold text-stone-700">
-              Email
-            </label>
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-              <input
-                id="gate-auth-email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="prenom@exemple.fr"
-                disabled={busy}
-                className="w-full rounded-xl border border-stone-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-fresh-500 focus:outline-none focus:ring-2 focus:ring-fresh-500/20"
-              />
+        {/* Formulaire */}
+        <div className="flex flex-col justify-center p-6 sm:p-8 lg:col-span-6 lg:p-10">
+          {mode === 'loading' && (
+            <div className="flex flex-col items-center gap-3 py-10 text-center">
+              <div className="h-9 w-9 animate-spin rounded-full border-4 border-fresh-600 border-t-transparent" />
+              <p className="text-sm font-medium text-slate-600">
+                Vérification de votre accès…
+              </p>
             </div>
-          </div>
+          )}
 
-          <div>
-            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
-              <label
-                htmlFor="gate-auth-password"
-                className="text-xs font-bold text-stone-700"
-              >
-                Mot de passe (6 car. min)
-              </label>
-              <button
-                type="button"
-                onClick={handlePasswordReset}
-                disabled={busy}
-                className="text-xs font-semibold text-fresh-700 hover:underline"
-              >
-                Mot de passe oublié ?
-              </button>
+          {mode === 'unauthorized' && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-xs leading-relaxed text-red-800">
+                <Shield className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-red-900">Accès non autorisé</p>
+                  <p>
+                    Votre compte n&apos;est pas autorisé à accéder à cette application.
+                  </p>
+                  {userEmail && (
+                    <p className="break-all text-red-700">
+                      Compte connecté : <span className="font-bold">{userEmail}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                {onRetryAccess && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        await onRetryAccess();
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
+                    Vérifier à nouveau
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await onSignOut();
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Se déconnecter / Changer de compte
+                </button>
+              </div>
             </div>
-            <div className="relative">
-              <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-              <input
-                id="gate-auth-password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                disabled={busy}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+          )}
+
+          {mode === 'unauthenticated' && (
+            <div>
+              <div className="mb-6 space-y-1">
+                <h2 className="text-xl font-bold text-slate-900">
+                  {modeState === 'login' ? 'Connexion à ton espace' : 'Créer ton compte'}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Utilise ton compte autorisé pour retrouver tes recettes et ton planning.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleGoogleSignIn()}
+                  className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-fresh-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-fresh-700 disabled:opacity-60"
+                >
+                  <LogIn className="h-4 w-4" />
+                  Continuer avec Google
+                </button>
+
+                <div className="flex items-center gap-3 text-xs text-slate-400">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <span>ou par e-mail</span>
+                  <div className="h-px flex-1 bg-slate-200" />
+                </div>
+
+                <form
+                  onSubmit={(e) => {
                     e.preventDefault();
-                    void handleEmailAuth(false);
-                  }
-                }}
-                className="w-full rounded-xl border border-stone-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-fresh-500 focus:outline-none focus:ring-2 focus:ring-fresh-500/20"
-              />
-            </div>
-          </div>
+                    void handleEmailAuth(modeState === 'register');
+                  }}
+                  className="space-y-3"
+                >
+                  <input
+                    id="gate-auth-email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="adresse@email.com"
+                    disabled={busy}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-fresh-600 focus:ring-2 focus:ring-fresh-100"
+                  />
 
-          {error && (
-            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-semibold text-red-700">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{error}</span>
+                  <div className="space-y-1.5">
+                    <input
+                      id="gate-auth-password"
+                      type="password"
+                      required
+                      minLength={6}
+                      autoComplete={modeState === 'register' ? 'new-password' : 'current-password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Mot de passe (6+ caractères)"
+                      disabled={busy}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-fresh-600 focus:ring-2 focus:ring-fresh-100"
+                    />
+                    {modeState === 'login' && (
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handlePasswordReset}
+                          disabled={busy}
+                          className="text-[11px] font-medium text-fresh-700 hover:underline disabled:opacity-50"
+                        >
+                          Mot de passe oublié ?
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    {modeState === 'register' ? (
+                      <>
+                        <UserPlus className="h-4 w-4" />
+                        Créer un compte
+                      </>
+                    ) : (
+                      <>
+                        <Mail className="h-4 w-4" />
+                        Se connecter par e-mail
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                <button
+                  type="button"
+                  className="w-full cursor-pointer pt-1 text-center text-xs font-medium text-slate-500 hover:text-fresh-700"
+                  onClick={() => {
+                    setModeState(modeState === 'login' ? 'register' : 'login');
+                    setError(null);
+                    setInfo(null);
+                  }}
+                >
+                  {modeState === 'login'
+                    ? 'Pas encore de compte ? Créer un compte'
+                    : 'Déjà inscrit ? Se connecter'}
+                </button>
+
+                {error && (
+                  <div className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-center text-xs font-medium text-red-700">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                {info && (
+                  <div className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-center text-xs font-medium text-emerald-800">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>{info}</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
-
-          {info && (
-            <div className="flex items-start gap-2 rounded-xl border border-fresh-200 bg-fresh-50 px-3.5 py-2.5 text-xs font-semibold text-fresh-800">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{info}</span>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-2 pt-1">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void handleEmailAuth(false)}
-              className="w-full rounded-xl bg-fresh-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-fresh-600/20 transition-all hover:bg-fresh-700 disabled:opacity-60"
-            >
-              Se connecter
-            </button>
-
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void handleEmailAuth(true)}
-              className="w-full rounded-xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-sm font-bold text-stone-800 transition-colors hover:bg-stone-100 disabled:opacity-60"
-            >
-              Créer un compte
-            </button>
-
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void handleGoogleSignIn()}
-              className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-bold text-stone-800 transition-colors hover:bg-stone-50 disabled:opacity-60"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#4285F4"
-                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
-                />
-              </svg>
-              Continuer avec Google
-            </button>
-          </div>
         </div>
       </div>
     </div>

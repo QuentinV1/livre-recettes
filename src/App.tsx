@@ -15,6 +15,7 @@ import {
   Users,
   AlertCircle,
   Cloud,
+  MessageSquarePlus,
   User as UserIcon,
   FileStack,
 } from 'lucide-react';
@@ -52,6 +53,7 @@ import {
   subscribeCloudState,
 } from './utils/storage';
 import { AuthGateScreen, CloudAuthModal } from './components/AuthScreen';
+import { FeedbackModal } from './components/FeedbackModal';
 import { RecipeCard } from './components/RecipeCard';
 import { RecipeDetail } from './components/RecipeDetail';
 import { RecipeFormModal } from './components/RecipeFormModal';
@@ -101,6 +103,7 @@ export function App() {
 
   // Modales
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [batchImportOpen, setBatchImportOpen] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
@@ -567,6 +570,16 @@ export function App() {
             )}
             <button
               type="button"
+              onClick={() => setFeedbackOpen(true)}
+              title="Envoyer un feedback (évolution ou bug)"
+              aria-label="Envoyer un feedback"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 text-xs font-bold text-stone-700 transition-colors hover:bg-stone-50 hover:text-stone-900 sm:h-10 sm:px-3"
+            >
+              <MessageSquarePlus className="h-4 w-4 shrink-0 text-fresh-600" />
+              <span className="hidden sm:inline">Feedback</span>
+            </button>
+            <button
+              type="button"
               id="btn-auth-header"
               onClick={() => setAuthModalOpen(true)}
               title={
@@ -868,6 +881,13 @@ export function App() {
       </nav>
 
       {/* Modal Connexion Cloud */}
+      <FeedbackModal
+        open={feedbackOpen}
+        user={user}
+        db={db}
+        onClose={() => setFeedbackOpen(false)}
+      />
+
       {authModalOpen && (
         <CloudAuthModal
           user={user}

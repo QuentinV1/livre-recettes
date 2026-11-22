@@ -22,6 +22,8 @@ import {
   joinSharedBook,
   leaveSharedBook,
 } from '../utils/storage';
+import { db } from '../lib/firebase';
+import { listShareableAppUsers, WhitelistEntry } from '../lib/accessControl';
 
 interface SettingsBackupModalProps {
   recipes: Recipe[];
@@ -62,6 +64,25 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   const [joinCode, setJoinCode] = useState('');
   const [bookBusy, setBookBusy] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [shareableUsers, setShareableUsers] = useState<WhitelistEntry[]>([]);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setShareableUsers([]);
+      return;
+    }
+    let cancelled = false;
+    listShareableAppUsers(db, 'livre-recettes')
+      .then((list) => {
+        if (!cancelled) setShareableUsers(list);
+      })
+      .catch(() => {
+        if (!cancelled) setShareableUsers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
 
   useEffect(() => {
     if (!showOtherApps) return;
@@ -384,6 +405,25 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
                       Rejoindre
                     </button>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {isSignedIn && shareableUsers.length > 0 && (
+              <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3 space-y-1.5">
+                <p className="text-[11px] font-semibold text-stone-600">
+                  Membres autorisés sur l&apos;application
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {shareableUsers.map((entry) => (
+                    <span
+                      key={entry.email}
+                      title={entry.email}
+                      className="inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-[11px] font-medium text-stone-700 ring-1 ring-stone-200"
+                    >
+                      {entry.displayName || entry.email}
+                    </span>
+                  ))}
                 </div>
               </div>
             )}

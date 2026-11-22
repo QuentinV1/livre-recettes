@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   AlertCircle,
@@ -8,17 +8,21 @@ import {
   LogOut,
   Mail,
   RefreshCw,
+  Shield,
   X,
 } from 'lucide-react';
 import {
   connexionEmail,
   connexionGoogle,
+  db,
   inscriptionEmail,
   rechargerUtilisateurFirebase,
   reinitialiserMotDePasseEmail,
   renvoyerEmailVerification,
 } from '../lib/firebase';
 import { CloudState } from '../utils/storage';
+import { resolveUserAccess, type AccessStatus } from '../lib/accessControl';
+import { AccessControlPanel } from './AccessControlPanel';
 
 function mapAuthError(err: unknown): string {
   const code = (err as { code?: string })?.code ?? '';
@@ -79,6 +83,26 @@ export const CloudAuthModal: React.FC<CloudAuthModalProps> = ({
     'Vérifiez votre boîte mail (ou utilisez « Continuer avec Google »).'
   );
   const [verifBusy, setVerifBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState<'account' | 'access'>('account');
+  const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
+
+  useEffect(() => {
+    if (!user?.email || !user.emailVerified) {
+      setAccessStatus(null);
+      setActiveTab('account');
+      return;
+    }
+    let cancelled = false;
+    resolveUserAccess(db, 'livre-recettes', user.email).then((status) => {
+      if (!cancelled) {
+        setAccessStatus(status);
+        if (!status.isAdmin) setActiveTab('account');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.email, user?.emailVerified]);
 
   const handleEmailAuth = async (isRegister: boolean) => {
     setError(null);
@@ -372,6 +396,50 @@ export const CloudAuthModal: React.FC<CloudAuthModalProps> = ({
           </div>
         ) : (
           <div id="auth-logged-in-panel" className="space-y-4">
+            {accessStatus?.isAdmin && (
+              <div className="flex gap-1.5 rounded-xl bg-stone-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('account')}
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    activeTab === 'account'
+                      ? 'bg-white text-stone-900 shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  Compte Cloud
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('access')}
+                  className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    activeTab === 'access'
+                      ? 'bg-white text-sky-700 shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  <Shield className="h-3.5 w-3.5" />
+                  Accès &amp; Rôles
+                </button>
+              </div>
+            )}
+
+            {accessStatus && !accessStatus.hasAppAccess && (
+              <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-medium text-red-700">
+                Votre compte n&apos;est pas autorisé sur cette application. Contactez un administrateur.
+              </div>
+            )}
+
+            {activeTab === 'access' && accessStatus?.isAdmin ? (
+              <AccessControlPanel
+                db={db}
+                user={user}
+                appId="livre-recettes"
+                appName="Livre de Recettes"
+                theme="light"
+              />
+            ) : (
+              <>
             <div className="rounded-2xl border border-stone-200 bg-stone-50 p-3.5">
               <div className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
                 Connecté en tant que
@@ -452,6 +520,8 @@ export const CloudAuthModal: React.FC<CloudAuthModalProps> = ({
                 Se déconnecter
               </button>
             </div>
+              </>
+            )}
           </div>
         )}
       </div>

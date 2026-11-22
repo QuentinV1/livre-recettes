@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Cloud,
   User as UserIcon,
+  FileStack,
 } from 'lucide-react';
 import { deconnexionFirebase, observerAuth } from './lib/firebase';
 import {
@@ -45,6 +46,7 @@ import { CloudAuthModal } from './components/AuthScreen';
 import { RecipeCard } from './components/RecipeCard';
 import { RecipeDetail } from './components/RecipeDetail';
 import { RecipeFormModal } from './components/RecipeFormModal';
+import { BatchImportModal } from './components/BatchImportModal';
 import { WeeklyPlanner } from './components/WeeklyPlanner';
 import { SettingsBackupModal } from './components/SettingsBackupModal';
 
@@ -88,6 +90,7 @@ export function App() {
   // Modales
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [formModalOpen, setFormModalOpen] = useState(false);
+  const [batchImportOpen, setBatchImportOpen] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickPlanRecipe, setQuickPlanRecipe] = useState<Recipe | null>(null);
@@ -216,6 +219,19 @@ export function App() {
     setSelectedRecipeId(recipe.id);
     setActiveTab('catalog');
   };
+
+  const handleBatchImportRecipe = useCallback(
+    async (recipe: Recipe) => {
+      const nextRecipes = [
+        recipe,
+        ...recipesRef.current.filter((r) => r.id !== recipe.id),
+      ].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+
+      updateRecipesState(nextRecipes);
+      await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
+    },
+    [updateRecipesState]
+  );
 
   const handleDeleteRecipe = async (id: string) => {
     const nextRecipes = recipesRef.current.filter((r) => r.id !== id);
@@ -432,6 +448,16 @@ export function App() {
               aria-label="Sauvegarde JSON & Réglages"
             >
               <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setBatchImportOpen(true)}
+              title="Importer un dossier de scans JPEG en masse"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 text-xs font-bold text-stone-700 transition-colors hover:bg-stone-50 hover:text-stone-900 sm:h-10 sm:px-3 sm:text-sm"
+            >
+              <FileStack className="h-4 w-4 text-fresh-600" />
+              <span className="hidden lg:inline">Import en masse</span>
             </button>
 
             <button
@@ -707,6 +733,16 @@ export function App() {
             setFormModalOpen(false);
             setEditingRecipe(null);
           }}
+        />
+      )}
+
+      {/* Modal Import en masse */}
+      {batchImportOpen && (
+        <BatchImportModal
+          existingRecipes={recipes}
+          geminiApiKey={geminiApiKey}
+          onImportRecipe={handleBatchImportRecipe}
+          onClose={() => setBatchImportOpen(false)}
         />
       )}
 

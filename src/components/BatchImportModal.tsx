@@ -47,10 +47,17 @@ interface BatchPair {
   backFile?: File;
   status: PairStatus;
   recipeTitle?: string;
-  recipeNumber?: string;
   duplicateOf?: string;
+  parsedDraft?: ParsedRecipeDraft;
   error?: string;
 }
+
+interface DuplicateEntry {
+  label: string;
+  ingredientNames: string[];
+}
+
+type DuplicateIndex = Map<string, DuplicateEntry[]>;
 
 function normalizeText(value: string): string {
   return value
@@ -61,38 +68,69 @@ function normalizeText(value: string): string {
     .trim();
 }
 
-function normalizeRecipeNumber(value?: string): string {
-  if (!value) return '';
-  const digits = value.match(/\d+/)?.[0];
-  if (digits) return digits.replace(/^0+/, '') || '0';
-  return normalizeText(value);
+function normalizeIngredientNames(ingredients?: { name: string }[]): string[] {
+  if (!ingredients) return [];
+  const seen = new Set<string>();
+  for (const ing of ingredients) {
+    const normalized = normalizeText(ing.name);
+    if (normalized) seen.add(normalized);
+  }
+  return Array.from(seen);
 }
 
-function buildDuplicateIndex(recipes: Recipe[]) {
-  const byNumber = new Map<string, string>();
-  const byTitle = new Map<string, string>();
-  for (const r of recipes) {
-    const label = r.recipeNumber ? `${r.recipeNumber} — ${r.title}` : r.title;
-    const numKey = normalizeRecipeNumber(r.recipeNumber);
-    if (numKey) byNumber.set(numKey, label);
-    const titleKey = normalizeText(r.title);
-    if (titleKey) byTitle.set(titleKey, label);
+function ingredientsMatch(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0) return true;
+  let matches = 0;
+  for (const ingA of a) {
+    const found = b.some(
+      (ingB) => ingA === ingB || ingA.includes(ingB) || ingB.includes(ingA)
+    );
+    if (found) matches++;
   }
-  return { byNumber, byTitle };
+  return matches / Math.min(a.length, b.length) >= 0.5;
+}
+
+function addRecipeToDuplicateIndex(
+  index: DuplicateIndex,
+  recipe: Pick<Recipe, 'title' | 'ingredients'>
+) {
+  const titleKey = normalizeText(recipe.title);
+  if (!titleKey) return;
+  const entry: DuplicateEntry = {
+    label: recipe.title,
+    ingredientNames: normalizeIngredientNames(recipe.ingredients),
+  };
+  const existing = index.get(titleKey);
+  if (existing) {
+    existing.push(entry);
+  } else {
+    index.set(titleKey, [entry]);
+  }
+}
+
+function buildDuplicateIndex(recipes: Recipe[]): DuplicateIndex {
+  const index: DuplicateIndex = new Map();
+  for (const r of recipes) {
+    addRecipeToDuplicateIndex(index, r);
+  }
+  return index;
 }
 
 function findDuplicateMatch(
-  index: { byNumber: Map<string, string>; byTitle: Map<string, string> },
-  recipeNumber?: string,
-  title?: string
+  index: DuplicateIndex,
+  title?: string,
+  ingredients?: { name: string }[]
 ): string | null {
-  const numKey = normalizeRecipeNumber(recipeNumber);
-  if (numKey && index.byNumber.has(numKey)) {
-    return index.byNumber.get(numKey) ?? null;
-  }
   const titleKey = title ? normalizeText(title) : '';
-  if (titleKey && index.byTitle.has(titleKey)) {
-    return index.byTitle.get(titleKey) ?? null;
+  if (!titleKey) return null;
+  const candidates = index.get(titleKey);
+  if (!candidates || candidates.length === 0) return null;
+
+  const candidateIngredients = normalizeIngredientNames(ingredients);
+  for (const entry of candidates) {
+    if (ingredientsMatch(candidateIngredients, entry.ingredientNames)) {
+      return entry.label;
+    }
   }
   return null;
 }
@@ -171,7 +209,6 @@ function draftToRecipe(draft: ParsedRecipeDraft, addReviewTag: boolean): Recipe 
 
   return {
     id: `rec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    recipeNumber: draft.recipeNumber?.trim() || undefined,
     title: (draft.title ?? '').trim(),
     subtitle: draft.subtitle?.trim() || undefined,
     prepTimeMinutes: Math.max(1, Number(draft.prepTimeMinutes) || 25),
@@ -271,6 +308,7 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
   const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [addReviewTag, setAddReviewTag] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
+  const [savingPairId, setSavingPairId] = useState<string | null>(null);
 
   const stopRequestedRef = useRef(false);
   const duplicateIndexRef = useRef(buildDuplicateIndex(existingRecipes));
@@ -354,13 +392,15 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
     };
   }, [pairs]);
 
-  const runQueue = async (targetStatuses: PairStatus[]) => {
+  const runQueue = async (targetStatuses: PairStatus[], specificPairId?: string) => {
     if (isRunning || pairs.length === 0) return;
     stopRequestedRef.current = false;
     setIsRunning(true);
 
     const queue = pairs
-      .filter((p) => targetStatuses.includes(p.status))
+      .filter((p) =>
+        specificPairId ? p.id === specificPairId : targetStatuses.includes(p.status)
+      )
       .map((p) => p.id);
 
     const updatePair = (id: string, patch: Partial<BatchPair>) => {
@@ -408,15 +448,15 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
           if (skipDuplicates) {
             const match = findDuplicateMatch(
               duplicateIndexRef.current,
-              draft.recipeNumber,
-              draft.title
+              draft.title,
+              draft.ingredients
             );
             if (match) {
               updatePair(pairId, {
                 status: 'duplicate',
                 recipeTitle: draft.title,
-                recipeNumber: draft.recipeNumber,
                 duplicateOf: match,
+                parsedDraft: draft,
               });
               continue;
             }
@@ -425,20 +465,15 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
           const recipe = draftToRecipe(draft, addReviewTag);
 
           // Mise à jour immédiate de l'index anti-doublon pour les paires suivantes
-          const numKey = normalizeRecipeNumber(recipe.recipeNumber);
-          const titleKey = normalizeText(recipe.title);
-          const label = recipe.recipeNumber
-            ? `${recipe.recipeNumber} — ${recipe.title}`
-            : recipe.title;
-          if (numKey) duplicateIndexRef.current.byNumber.set(numKey, label);
-          if (titleKey) duplicateIndexRef.current.byTitle.set(titleKey, label);
+          addRecipeToDuplicateIndex(duplicateIndexRef.current, recipe);
 
           await onImportRecipe(recipe);
 
           updatePair(pairId, {
             status: 'imported',
             recipeTitle: recipe.title,
-            recipeNumber: recipe.recipeNumber,
+            duplicateOf: undefined,
+            parsedDraft: undefined,
           });
         } catch (err) {
           if (stopRequestedRef.current) {
@@ -462,6 +497,47 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
 
   const handlePause = () => {
     stopRequestedRef.current = true;
+  };
+
+  const handleKeepDuplicate = async (pair: BatchPair) => {
+    if (isRunning || savingPairId || !pair.parsedDraft) return;
+    setSavingPairId(pair.id);
+    try {
+      const recipe = draftToRecipe(pair.parsedDraft, addReviewTag);
+      addRecipeToDuplicateIndex(duplicateIndexRef.current, recipe);
+      await onImportRecipe(recipe);
+      setPairs((prev) =>
+        prev.map((p) =>
+          p.id === pair.id
+            ? {
+                ...p,
+                status: 'imported',
+                recipeTitle: recipe.title,
+                duplicateOf: undefined,
+                parsedDraft: undefined,
+                error: undefined,
+              }
+            : p
+        )
+      );
+    } catch (err) {
+      setPairs((prev) =>
+        prev.map((p) =>
+          p.id === pair.id
+            ? {
+                ...p,
+                status: 'error',
+                error:
+                  err instanceof Error
+                    ? err.message
+                    : 'Impossible de sauvegarder la fiche.',
+              }
+            : p
+        )
+      );
+    } finally {
+      setSavingPairId(null);
+    }
   };
 
   const hasOddCount =
@@ -583,7 +659,7 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
                     className="h-4 w-4 rounded border-stone-300 text-fresh-600 focus:ring-fresh-500"
                   />
                   <CopyCheck className="h-4 w-4 text-fresh-600" />
-                  Ignorer les doublons (par numéro ou titre)
+                  Ignorer les doublons (par titre et ingrédients)
                 </label>
 
                 <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-stone-700">
@@ -668,7 +744,7 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-bold text-stone-800">
                           {pair.recipeTitle
-                            ? `${pair.recipeNumber ? `${pair.recipeNumber} · ` : ''}${pair.recipeTitle}`
+                            ? pair.recipeTitle
                             : [pair.frontFile?.name, pair.backFile?.name]
                                 .filter(Boolean)
                                 .join(' + ')}
@@ -692,10 +768,40 @@ export const BatchImportModal: React.FC<BatchImportModalProps> = ({
                         <CheckCircle2 className="h-4 w-4 text-fresh-600" />
                       )}
                       {pair.status === 'duplicate' && (
-                        <CopyCheck className="h-4 w-4 text-amber-600" />
+                        <>
+                          {pair.parsedDraft && (
+                            <button
+                              type="button"
+                              disabled={isRunning || savingPairId === pair.id}
+                              onClick={() => handleKeepDuplicate(pair)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {savingPairId === pair.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-3 w-3" />
+                              )}
+                              Conserver malgré doublon
+                            </button>
+                          )}
+                          <CopyCheck className="h-4 w-4 text-amber-600" />
+                        </>
                       )}
                       {pair.status === 'error' && (
-                        <XCircle className="h-4 w-4 text-red-600" />
+                        <>
+                          {!isRunning && (
+                            <button
+                              type="button"
+                              onClick={() => runQueue(['error'], pair.id)}
+                              title="Relancer cette fiche"
+                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2.5 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              Relancer
+                            </button>
+                          )}
+                          <XCircle className="h-4 w-4 text-red-600" />
+                        </>
                       )}
 
                       {!isRunning && pair.status === 'pending' && pairingMode !== 'back-only' && (

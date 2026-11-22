@@ -25,18 +25,22 @@ import {
   MealSlot,
   Recipe,
   RecipeBookBackup,
+  RecipeRating,
   WeeklyPlan,
   createEmptyWeeklyPlan,
 } from './types/recipe';
+import { getUserDisplayLabel } from './utils/ratings';
 import {
   activerSyncCloud,
   arreterListenersFirestore,
   cloudState as initialCloudState,
   CloudState,
   forcerSyncCloud,
+  isRecipeOwnedBy,
   loadGeminiApiKey,
   loadLocalRecipes,
   loadLocalWeeklyPlan,
+  rateRecipeInCloud,
   reinitialiserEtatCloud,
   sauvegarderDonnees,
   saveGeminiApiKey,
@@ -206,8 +210,21 @@ export function App() {
   const weeklyCount = useMemo(() => recipes.filter((r) => r.isWeekly).length, [recipes]);
 
   const handleSaveRecipe = async (recipe: Recipe) => {
+    const existing = recipesRef.current.find((r) => r.id === recipe.id);
+    if (existing && cloud.activeBookId && user && !isRecipeOwnedBy(existing, user.uid)) {
+      return;
+    }
+    const mergedRecipe: Recipe = {
+      ...recipe,
+      ratings: recipe.ratings ?? existing?.ratings,
+      ownerUid: existing?.ownerUid || recipe.ownerUid || user?.uid,
+      ownerName:
+        existing?.ownerName ||
+        recipe.ownerName ||
+        (user ? getUserDisplayLabel(user) : undefined),
+    };
     const nextRecipes = [
-      recipe,
+      mergedRecipe,
       ...recipesRef.current.filter((r) => r.id !== recipe.id),
     ].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
 
@@ -216,24 +233,34 @@ export function App() {
 
     setFormModalOpen(false);
     setEditingRecipe(null);
-    setSelectedRecipeId(recipe.id);
+    setSelectedRecipeId(mergedRecipe.id);
     setActiveTab('catalog');
   };
 
   const handleBatchImportRecipe = useCallback(
     async (recipe: Recipe) => {
+      const stamped: Recipe = {
+        ...recipe,
+        ownerUid: recipe.ownerUid || user?.uid,
+        ownerName:
+          recipe.ownerName || (user ? getUserDisplayLabel(user) : undefined),
+      };
       const nextRecipes = [
-        recipe,
-        ...recipesRef.current.filter((r) => r.id !== recipe.id),
+        stamped,
+        ...recipesRef.current.filter((r) => r.id !== stamped.id),
       ].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
 
       updateRecipesState(nextRecipes);
       await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
     },
-    [updateRecipesState]
+    [updateRecipesState, user]
   );
 
   const handleDeleteRecipe = async (id: string) => {
+    const target = recipesRef.current.find((r) => r.id === id);
+    if (cloud.activeBookId && user && target && !isRecipeOwnedBy(target, user.uid)) {
+      return;
+    }
     const nextRecipes = recipesRef.current.filter((r) => r.id !== id);
 
     const nextPlan = { ...weeklyPlanRef.current };
@@ -256,6 +283,9 @@ export function App() {
     if (e) e.stopPropagation();
     const target = recipesRef.current.find((r) => r.id === recipeId);
     if (!target) return;
+    if (cloud.activeBookId && user && !isRecipeOwnedBy(target, user.uid)) {
+      return;
+    }
     const updated: Recipe = {
       ...target,
       isWeekly: !target.isWeekly,
@@ -264,6 +294,43 @@ export function App() {
     const nextRecipes = recipesRef.current.map((r) => (r.id === recipeId ? updated : r));
     updateRecipesState(nextRecipes);
     await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
+  };
+
+  const handleRateRecipe = async (recipeId: string, score: number | null) => {
+    const target = recipesRef.current.find((r) => r.id === recipeId);
+    if (!target) return;
+
+    const uid = user?.uid ?? 'local';
+    const nextRatings: Record<string, RecipeRating> = { ...(target.ratings ?? {}) };
+    let newRating: RecipeRating | null = null;
+
+    if (score === null) {
+      delete nextRatings[uid];
+    } else {
+      newRating = {
+        score,
+        userName: getUserDisplayLabel(user),
+        updatedAt: new Date().toISOString(),
+      };
+      nextRatings[uid] = newRating;
+    }
+
+    const updated: Recipe = {
+      ...target,
+      ratings: Object.keys(nextRatings).length > 0 ? nextRatings : undefined,
+    };
+    const nextRecipes = recipesRef.current.map((r) => (r.id === recipeId ? updated : r));
+    updateRecipesState(nextRecipes);
+
+    if (user) {
+      try {
+        await rateRecipeInCloud(recipeId, newRating);
+      } catch {
+        await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
+      }
+    } else {
+      await sauvegarderDonnees(nextRecipes, weeklyPlanRef.current);
+    }
   };
 
   const handleAssignSlot = (
@@ -414,6 +481,19 @@ export function App() {
 
           {/* Actions droite */}
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            {user && cloud.activeBookId && (
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                title={`Foyer : ${cloud.activeBook?.name || cloud.activeBookId}`}
+                className="hidden sm:inline-flex h-9 items-center gap-1.5 rounded-xl border border-fresh-200 bg-fresh-50 px-2.5 text-xs font-bold text-fresh-800 hover:bg-fresh-100 sm:h-10"
+              >
+                <Users className="h-3.5 w-3.5 shrink-0" />
+                <span className="max-w-[110px] truncate">
+                  {cloud.activeBook?.name || 'Foyer'}
+                </span>
+              </button>
+            )}
             <button
               type="button"
               id="btn-auth-header"
@@ -503,6 +583,9 @@ export function App() {
             recipe={selectedRecipe}
             initialServings={selectedRecipeInitialServings}
             backLabel={activeTab === 'planner' ? 'Semaine' : 'Catalogue'}
+            currentUserId={user?.uid ?? 'local'}
+            canEdit={!cloud.activeBookId || !user || isRecipeOwnedBy(selectedRecipe, user.uid)}
+            isInFoyer={Boolean(user && cloud.activeBookId)}
             onBack={() => {
               setSelectedRecipeId(null);
               setSelectedRecipeInitialServings(undefined);
@@ -517,6 +600,7 @@ export function App() {
               setQuickPlanServings(rec.servings || 2);
               setQuickPlanRecipe(rec);
             }}
+            onRate={handleRateRecipe}
           />
         ) : activeTab === 'planner' ? (
           <WeeklyPlanner
@@ -642,6 +726,9 @@ export function App() {
                   <RecipeCard
                     key={rec.id}
                     recipe={rec}
+                    canEdit={!cloud.activeBookId || !user || isRecipeOwnedBy(rec, user.uid)}
+                    isInFoyer={Boolean(user && cloud.activeBookId)}
+                    currentUserId={user?.uid ?? 'local'}
                     onOpen={(r) => {
                       setSelectedRecipeInitialServings(undefined);
                       setSelectedRecipeId(r.id);
@@ -754,6 +841,9 @@ export function App() {
           geminiApiKey={geminiApiKey}
           userEmail={user?.email}
           userDisplayName={user?.displayName}
+          isSignedIn={Boolean(user)}
+          activeBookId={cloud.activeBookId}
+          activeBook={cloud.activeBook}
           onOpenCloudModal={() => setAuthModalOpen(true)}
           onSaveGeminiKey={(k) => {
             saveGeminiApiKey(k);

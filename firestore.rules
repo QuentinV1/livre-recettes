@@ -9,7 +9,7 @@ service cloud.firestore {
     //
     // This security rules file assumes the following data structures:
     //
-    // 1. Collection: users/{userId}/recipes/{recipeId}
+    // 1. Collection: users/{userId}/recipes/{recipeId} (legacy)
     //    Document ID: recipeId (matches data.id)
     //    Owner: Authenticated user whose UID == userId
     //    Required fields:
@@ -24,23 +24,54 @@ service cloud.firestore {
     //      - createdAt: string (1..64 chars, immutable)
     //      - updatedAt: string (1..64 chars)
     //    Optional fields:
-    //      - recipeNumber: string (0..100 chars)
-    //      - subtitle: string (0..500 chars)
-    //      - prepTimeRange: string (0..100 chars)
-    //      - utensils: list (0..50 items)
-    //      - stepDetails: list (0..100 items)
-    //      - nutrition: list (0..50 items)
-    //      - allergens: string (0..1000 chars)
-    //      - imageFront: string (0..900000 chars, compressed Data URL)
-    //      - imageBack: string (0..900000 chars, compressed Data URL)
-    //      - notes: string (0..10000 chars)
+    //      - recipeNumber, subtitle, prepTimeRange, utensils, stepDetails,
+    //        nutrition, allergens, imageFront, imageBack, notes
     //
-    // 2. Document: users/{userId}/meta/weeklyPlan
+    // 2. Document: users/{userId}/meta/weeklyPlan (legacy)
     //    Document ID: 'weeklyPlan'
     //    Owner: Authenticated user whose UID == userId
     //    Optional fields (subset of days of the week):
     //      - lundi, mardi, mercredi, jeudi, vendredi, samedi, dimanche: map (DayPlan)
     //        Each DayPlan map allows only keys: ['midi', 'soir', 'midiServings', 'soirServings']
+    //
+    // 3. Collection: recettes_users/{userId}/recipes/{recipeId}
+    //    Document ID: recipeId (matches data.id)
+    //    Owner: Authenticated user whose UID == userId
+    //    Same required/optional fields as above, with null allowed on optional fields
+    //    (produced by cleanForFirestore), plus optional:
+    //      - ownerUid: string (1..128 chars) or null
+    //      - ownerName: string (1..100 chars) or null
+    //      - ratings: map<uid, { score: int (1..5), userName: string (1..100), updatedAt: string (1..64) }> or null
+    //
+    // 4. Collection: recettes_users/{userId}/settings/{settingId}
+    //    Document ID: settingId (e.g. 'main', matches data.id)
+    //    Owner: Authenticated user whose UID == userId
+    //    Required fields:
+    //      - id: string (1..64 chars, immutable, must equal settingId)
+    //      - updatedAt: string (1..64 chars)
+    //    Optional fields:
+    //      - weeklyPlan: map (DayPlan per day of week) or null
+    //      - activeBookId: string (1..64 chars) or null
+    //
+    // 5. Collection: recettes_books/{bookId}
+    //    Document ID: bookId (matches data.id)
+    //    Fields:
+    //      - id: string (1..64 chars, immutable, must equal bookId)
+    //      - name: string (1..100 chars)
+    //      - ownerUid: string (1..128 chars, immutable)
+    //      - memberUids: list<string> (1..50 items)
+    //      - members: map<uid, { uid, displayName, email?, joinedAt }> (1..50 entries)
+    //      - createdAt: string (1..64 chars, immutable)
+    //      - updatedAt: string (1..64 chars)
+    //
+    // 6. Collection: recettes_books/{bookId}/recipes/{recipeId}
+    //    Document ID: recipeId (matches data.id)
+    //    Access: Authenticated members listed in recettes_books/{bookId}.memberUids
+    //      - Create: any book member, with ownerUid == request.auth.uid
+    //      - Update: recipe owner (or legacy recipe without ownerUid) for full edits,
+    //                OR any book member updating only their own ratings[request.auth.uid]
+    //      - Delete: recipe owner (or legacy recipe without ownerUid)
+    //    Same schema as recettes_users/{userId}/recipes/{recipeId}.
     //
     // ===============================================================
 
@@ -56,6 +87,13 @@ service cloud.firestore {
     // Check if the authenticated user owns the path
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Check if the authenticated user is a member of the shared book
+    function isBookMember(bookId) {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/recettes_books/$(bookId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/recettes_books/$(bookId)).data.memberUids;
     }
 
     // Validate required fields exist on the incoming document
@@ -80,7 +118,7 @@ service cloud.firestore {
              data[field].size() <= maxLen;
     }
 
-    // Validate an optional string's type and length if present
+    // Validate an optional string's type and length if present (legacy: non-null)
     function isValidOptionalString(data, field, minLen, maxLen) {
       return !(field in data) ||
              (data[field] is string &&
@@ -88,9 +126,25 @@ service cloud.firestore {
               data[field].size() <= maxLen);
     }
 
-    // Validate an optional list's type and max size if present
+    // Validate an optional list's type and max size if present (legacy: non-null)
     function isValidOptionalList(data, field, maxSize) {
       return !(field in data) ||
+             (data[field] is list && data[field].size() <= maxSize);
+    }
+
+    // Validate an optional string's type and length if present and non-null
+    function isValidOptionalStringOrNull(data, field, minLen, maxLen) {
+      return !(field in data) ||
+             data[field] == null ||
+             (data[field] is string &&
+              data[field].size() >= minLen &&
+              data[field].size() <= maxLen);
+    }
+
+    // Validate an optional list's type and max size if present and non-null
+    function isValidOptionalListOrNull(data, field, maxSize) {
+      return !(field in data) ||
+             data[field] == null ||
              (data[field] is list && data[field].size() <= maxSize);
     }
 
@@ -98,6 +152,7 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
 
+    // Legacy validator for users/{userId}/recipes/{recipeId}
     function isValidRecipe(data, recipeId) {
       let requiredFields = [
         'id',
@@ -166,6 +221,131 @@ service cloud.firestore {
              isValidOptionalString(data, 'notes', 0, 10000);
     }
 
+    function isValidRatingEntry(rating) {
+      return rating is map &&
+             rating.keys().hasAll(['score', 'userName', 'updatedAt']) &&
+             rating.keys().hasOnly(['score', 'userName', 'updatedAt']) &&
+             rating.score is int &&
+             rating.score >= 1 &&
+             rating.score <= 5 &&
+             rating.userName is string &&
+             rating.userName.size() >= 1 &&
+             rating.userName.size() <= 100 &&
+             rating.updatedAt is string &&
+             rating.updatedAt.size() >= 1 &&
+             rating.updatedAt.size() <= 64;
+    }
+
+    function isValidOptionalRatings(data) {
+      return !('ratings' in data) ||
+             data.ratings == null ||
+             (data.ratings is map &&
+              data.ratings.size() <= 100 &&
+              (!(request.auth.uid in data.ratings) ||
+               isValidRatingEntry(data.ratings[request.auth.uid])));
+    }
+
+    // Validator for recettes_users/{userId}/recipes/{recipeId} and recettes_books/{bookId}/recipes/{recipeId}
+    function isValidRecettesRecipe(data, recipeId) {
+      let requiredFields = [
+        'id',
+        'title',
+        'prepTimeMinutes',
+        'servings',
+        'tags',
+        'ingredients',
+        'steps',
+        'isWeekly',
+        'createdAt',
+        'updatedAt'
+      ];
+      let allowedFields = [
+        'id',
+        'recipeNumber',
+        'title',
+        'subtitle',
+        'prepTimeMinutes',
+        'prepTimeRange',
+        'servings',
+        'tags',
+        'utensils',
+        'ingredients',
+        'steps',
+        'stepDetails',
+        'nutrition',
+        'allergens',
+        'imageFront',
+        'imageBack',
+        'notes',
+        'ownerUid',
+        'ownerName',
+        'ratings',
+        'isWeekly',
+        'createdAt',
+        'updatedAt'
+      ];
+
+      return hasRequiredFields(requiredFields) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             isValidString(data, 'id', 1, 128) &&
+             data.id == recipeId &&
+             isValidString(data, 'title', 1, 200) &&
+             data.prepTimeMinutes is number &&
+             data.prepTimeMinutes >= 0 &&
+             data.prepTimeMinutes <= 10000 &&
+             data.servings is int &&
+             data.servings >= 1 &&
+             data.servings <= 100 &&
+             data.tags is list &&
+             data.tags.size() <= 50 &&
+             data.ingredients is list &&
+             data.ingredients.size() <= 200 &&
+             data.steps is list &&
+             data.steps.size() <= 100 &&
+             data.isWeekly is bool &&
+             isValidString(data, 'createdAt', 1, 64) &&
+             isValidString(data, 'updatedAt', 1, 64) &&
+             isValidOptionalStringOrNull(data, 'recipeNumber', 0, 100) &&
+             isValidOptionalStringOrNull(data, 'subtitle', 0, 500) &&
+             isValidOptionalStringOrNull(data, 'prepTimeRange', 0, 100) &&
+             isValidOptionalListOrNull(data, 'utensils', 50) &&
+             isValidOptionalListOrNull(data, 'stepDetails', 100) &&
+             isValidOptionalListOrNull(data, 'nutrition', 50) &&
+             isValidOptionalStringOrNull(data, 'allergens', 0, 1000) &&
+             isValidOptionalStringOrNull(data, 'imageFront', 0, 900000) &&
+             isValidOptionalStringOrNull(data, 'imageBack', 0, 900000) &&
+             isValidOptionalStringOrNull(data, 'notes', 0, 10000) &&
+             isValidOptionalStringOrNull(data, 'ownerUid', 1, 128) &&
+             isValidOptionalStringOrNull(data, 'ownerName', 1, 100) &&
+             isValidOptionalRatings(data);
+    }
+
+    // Validate that a non-owner book member is ONLY updating their own rating entry
+    function isValidBookRecipeRatingUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ratings']) &&
+             (
+               (
+                 (!('ratings' in request.resource.data) || request.resource.data.ratings == null) &&
+                 'ratings' in resource.data &&
+                 resource.data.ratings is map &&
+                 resource.data.ratings.keys().hasOnly([request.auth.uid])
+               ) ||
+               (
+                 'ratings' in request.resource.data &&
+                 request.resource.data.ratings is map &&
+                 request.resource.data.ratings.size() <= 100 &&
+                 (
+                   (('ratings' in resource.data && resource.data.ratings is map) &&
+                    request.resource.data.ratings.diff(resource.data.ratings).affectedKeys().hasOnly([request.auth.uid])) ||
+                   ((!('ratings' in resource.data) || !(resource.data.ratings is map)) &&
+                    request.resource.data.ratings.keys().hasOnly([request.auth.uid]))
+                 ) &&
+                 (!(request.auth.uid in request.resource.data.ratings) ||
+                  isValidRatingEntry(request.resource.data.ratings[request.auth.uid]))
+               )
+             );
+    }
+
     function isValidDaySlotValue(val) {
       return val == null || (val is string && val.size() >= 1 && val.size() <= 128);
     }
@@ -175,8 +355,8 @@ service cloud.firestore {
              dayData.keys().hasOnly(['midi', 'soir', 'midiServings', 'soirServings']) &&
              (!('midi' in dayData) || isValidDaySlotValue(dayData.midi)) &&
              (!('soir' in dayData) || isValidDaySlotValue(dayData.soir)) &&
-             (!('midiServings' in dayData) || (dayData.midiServings is int && dayData.midiServings >= 1 && dayData.midiServings <= 100)) &&
-             (!('soirServings' in dayData) || (dayData.soirServings is int && dayData.soirServings >= 1 && dayData.soirServings <= 100));
+             (!('midiServings' in dayData) || dayData.midiServings == null || (dayData.midiServings is int && dayData.midiServings >= 1 && dayData.midiServings <= 100)) &&
+             (!('soirServings' in dayData) || dayData.soirServings == null || (dayData.soirServings is int && dayData.soirServings >= 1 && dayData.soirServings <= 100));
     }
 
     function isValidDayIfPresent(data, dayKey) {
@@ -194,7 +374,8 @@ service cloud.firestore {
         'dimanche'
       ];
 
-      return hasOnlyAllowedFields(allowedDays) &&
+      return data is map &&
+             data.keys().hasOnly(allowedDays) &&
              isValidDayIfPresent(data, 'lundi') &&
              isValidDayIfPresent(data, 'mardi') &&
              isValidDayIfPresent(data, 'mercredi') &&
@@ -204,11 +385,71 @@ service cloud.firestore {
              isValidDayIfPresent(data, 'dimanche');
     }
 
+    function isValidUserSettings(data, settingId) {
+      let requiredFields = ['id', 'updatedAt'];
+      let allowedFields = ['id', 'weeklyPlan', 'activeBookId', 'updatedAt'];
+
+      return hasRequiredFields(requiredFields) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             isValidString(data, 'id', 1, 64) &&
+             data.id == settingId &&
+             isValidString(data, 'updatedAt', 1, 64) &&
+             (!('weeklyPlan' in data) || data.weeklyPlan == null || isValidWeeklyPlan(data.weeklyPlan)) &&
+             isValidOptionalStringOrNull(data, 'activeBookId', 1, 64);
+    }
+
+    function isValidBookMember(member) {
+      return member is map &&
+             member.keys().hasAll(['uid', 'displayName', 'joinedAt']) &&
+             member.keys().hasOnly(['uid', 'displayName', 'email', 'joinedAt']) &&
+             isValidString(member, 'uid', 1, 128) &&
+             isValidString(member, 'displayName', 1, 100) &&
+             isValidOptionalStringOrNull(member, 'email', 0, 200) &&
+             isValidString(member, 'joinedAt', 1, 64);
+    }
+
+    function isValidSharedBook(data, bookId) {
+      let requiredFields = [
+        'id',
+        'name',
+        'ownerUid',
+        'memberUids',
+        'members',
+        'createdAt',
+        'updatedAt'
+      ];
+      let allowedFields = [
+        'id',
+        'name',
+        'ownerUid',
+        'memberUids',
+        'members',
+        'createdAt',
+        'updatedAt'
+      ];
+
+      return hasRequiredFields(requiredFields) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             isValidString(data, 'id', 1, 64) &&
+             data.id == bookId &&
+             isValidString(data, 'name', 1, 100) &&
+             isValidString(data, 'ownerUid', 1, 128) &&
+             data.memberUids is list &&
+             data.memberUids.size() >= 1 &&
+             data.memberUids.size() <= 50 &&
+             data.members is map &&
+             data.members.size() >= 1 &&
+             data.members.size() <= 50 &&
+             (!(request.auth.uid in data.members) || isValidBookMember(data.members[request.auth.uid])) &&
+             isValidString(data, 'createdAt', 1, 64) &&
+             isValidString(data, 'updatedAt', 1, 64);
+    }
+
     // ===============================================================
     // Collection Rules
     // ===============================================================
 
-    // Per-user recipes collection
+    // Legacy per-user recipes collection
     match /users/{userId}/recipes/{recipeId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId) &&
@@ -219,7 +460,7 @@ service cloud.firestore {
       allow delete: if isOwner(userId);
     }
 
-    // Per-user weekly meal plan document
+    // Legacy per-user weekly meal plan document
     match /users/{userId}/meta/weeklyPlan {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId) &&
@@ -227,6 +468,88 @@ service cloud.firestore {
       allow update: if isOwner(userId) &&
                        isValidWeeklyPlan(request.resource.data);
       allow delete: if isOwner(userId);
+    }
+
+    // Per-user recipes collection (recettes_users)
+    match /recettes_users/{userId}/recipes/{recipeId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) &&
+                       isValidRecettesRecipe(request.resource.data, recipeId);
+      allow update: if isOwner(userId) &&
+                       isValidRecettesRecipe(request.resource.data, recipeId) &&
+                       areImmutableFieldsUnchanged(['id', 'createdAt']);
+      allow delete: if isOwner(userId);
+    }
+
+    // Per-user settings collection (weeklyPlan, activeBookId)
+    match /recettes_users/{userId}/settings/{settingId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) &&
+                       isValidUserSettings(request.resource.data, settingId);
+      allow update: if isOwner(userId) &&
+                       isValidUserSettings(request.resource.data, settingId) &&
+                       areImmutableFieldsUnchanged(['id']);
+      allow delete: if isOwner(userId);
+    }
+
+    // Shared recipe books
+    match /recettes_books/{bookId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       request.resource.data.ownerUid == request.auth.uid &&
+                       request.auth.uid in request.resource.data.memberUids &&
+                       isValidSharedBook(request.resource.data, bookId);
+      allow update: if isAuthenticated() &&
+                       isValidSharedBook(request.resource.data, bookId) &&
+                       areImmutableFieldsUnchanged(['id', 'ownerUid', 'createdAt']) &&
+                       (
+                         request.auth.uid in resource.data.memberUids ||
+                         (
+                           request.resource.data.ownerUid == resource.data.ownerUid &&
+                           request.resource.data.memberUids.hasAll(resource.data.memberUids) &&
+                           request.auth.uid in request.resource.data.memberUids
+                         )
+                       );
+      allow delete: if isAuthenticated() &&
+                       (
+                         resource.data.ownerUid == request.auth.uid ||
+                         (request.auth.uid in resource.data.memberUids && resource.data.memberUids.size() <= 1)
+                       );
+    }
+
+    // Recipes inside a shared book
+    match /recettes_books/{bookId}/recipes/{recipeId} {
+      allow read: if isBookMember(bookId);
+      allow create: if isBookMember(bookId) &&
+                       request.resource.data.ownerUid == request.auth.uid &&
+                       isValidRecettesRecipe(request.resource.data, recipeId);
+      allow update: if isBookMember(bookId) &&
+                       (
+                         (
+                           isValidRecettesRecipe(request.resource.data, recipeId) &&
+                           (
+                             (
+                               'ownerUid' in resource.data &&
+                               resource.data.ownerUid == request.auth.uid &&
+                               areImmutableFieldsUnchanged(['id', 'createdAt', 'ownerUid'])
+                             ) ||
+                             (
+                               (!('ownerUid' in resource.data) || resource.data.ownerUid == null) &&
+                               areImmutableFieldsUnchanged(['id', 'createdAt']) &&
+                               (!('ownerUid' in request.resource.data) ||
+                                request.resource.data.ownerUid == null ||
+                                request.resource.data.ownerUid == request.auth.uid)
+                             )
+                           )
+                         ) ||
+                         isValidBookRecipeRatingUpdate()
+                       );
+      allow delete: if isBookMember(bookId) &&
+                       (
+                         !('ownerUid' in resource.data) ||
+                         resource.data.ownerUid == null ||
+                         resource.data.ownerUid == request.auth.uid
+                       );
     }
 
     // Default deny for all other paths

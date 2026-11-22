@@ -9,7 +9,6 @@ import {
 } from '../types/recipe';
 
 export interface ParsedRecipeDraft {
-  recipeNumber?: string;
   title?: string;
   subtitle?: string;
   prepTimeMinutes?: number;
@@ -253,11 +252,6 @@ function parseRectoHeaderText(text: string): Partial<ParsedRecipeDraft> {
   if (prepTimeMinutes) result.prepTimeMinutes = prepTimeMinutes;
   if (prepTimeRange) result.prepTimeRange = prepTimeRange;
   if (tags.length > 0) result.tags = tags;
-
-  const numMatch = text.match(/recette\s*n?[°o]?\s*(\d+)/i);
-  if (numMatch) {
-    result.recipeNumber = `Recette ${numMatch[1]}`;
-  }
 
   const titleCandidates: string[] = [];
   for (const line of lines) {
@@ -512,9 +506,6 @@ export function parseRecipeText(rawText: string): ParsedRecipeDraft {
   if (prepTimeRange) draft.prepTimeRange = prepTimeRange;
   if (tags.length > 0) draft.tags = tags;
 
-  const numMatch = rawText.match(/recette\s*n?[°o]?\s*(\d+)/i);
-  if (numMatch) draft.recipeNumber = `Recette ${numMatch[1]}`;
-
   const servingsMatch = rawText.match(/(\d{1,2})\s*(?:personnes?|pers\.?|portions?)\b/i);
   if (servingsMatch) {
     const parsedServings = parseInt(servingsMatch[1], 10);
@@ -735,7 +726,6 @@ export async function extractRecipeWithTesseract(
         handler: (text) => {
           rawSections.push(`=== RECTO EN-TÊTE ===\n${text}`);
           const header = parseRectoHeaderText(text);
-          if (header.recipeNumber) draft.recipeNumber = header.recipeNumber;
           if (header.title) draft.title = header.title;
           if (header.subtitle) draft.subtitle = header.subtitle;
           if (header.prepTimeMinutes) draft.prepTimeMinutes = header.prepTimeMinutes;
@@ -843,7 +833,6 @@ Structure connue de la fiche :
 
 Retourne exactement ce JSON valide en français :
 {
-  "recipeNumber": "Recette 244",
   "title": "Titre du plat",
   "subtitle": "Sous-titre ou accompagnement",
   "prepTimeRange": "35 - 45 min",
@@ -1025,7 +1014,6 @@ Pour "dishBox" : indique les coordonnées normalisées [ymin, xmin, ymax, xmax] 
   }
 
   return {
-    recipeNumber: parsed.recipeNumber ? String(parsed.recipeNumber) : undefined,
     title: parsed.title || undefined,
     subtitle: parsed.subtitle || undefined,
     prepTimeRange: parsed.prepTimeRange ? String(parsed.prepTimeRange) : undefined,

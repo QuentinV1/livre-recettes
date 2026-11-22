@@ -18,9 +18,31 @@ export interface RecipeStep {
   chefTip?: string;
 }
 
+export interface RecipeRating {
+  score: number; // 1..5 (entier)
+  userName: string;
+  updatedAt: string;
+}
+
+export interface SharedBookMember {
+  uid: string;
+  displayName: string;
+  email?: string;
+  joinedAt: string;
+}
+
+export interface SharedBook {
+  id: string;
+  name: string;
+  ownerUid: string;
+  memberUids: string[];
+  members: Record<string, SharedBookMember>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Recipe {
   id: string;
-  recipeNumber?: string; // ex: "Recette 244"
   title: string;
   subtitle?: string;
   prepTimeMinutes: number;
@@ -36,6 +58,9 @@ export interface Recipe {
   imageFront?: string; // Photo recto (plat) - Data URL compressée
   imageBack?: string;  // Photo verso (fiche texte) - Data URL compressée
   notes?: string;
+  ratings?: Record<string, RecipeRating>; // Clé = uid Firebase (ou 'local')
+  ownerUid?: string; // UID du propriétaire de la recette (notamment dans un foyer)
+  ownerName?: string; // Nom affiché du propriétaire
   isWeekly: boolean;
   createdAt: string;
   updatedAt: string;

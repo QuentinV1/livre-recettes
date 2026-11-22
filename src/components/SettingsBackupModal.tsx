@@ -10,9 +10,18 @@ import {
   User,
   LayoutGrid,
   ExternalLink,
+  Users,
+  Copy,
+  LogOut,
+  Plus,
 } from 'lucide-react';
-import { Recipe, RecipeBookBackup, WeeklyPlan } from '../types/recipe';
-import { downloadBackupJson } from '../utils/storage';
+import { Recipe, RecipeBookBackup, SharedBook, WeeklyPlan } from '../types/recipe';
+import {
+  createSharedBook,
+  downloadBackupJson,
+  joinSharedBook,
+  leaveSharedBook,
+} from '../utils/storage';
 
 interface SettingsBackupModalProps {
   recipes: Recipe[];
@@ -20,6 +29,9 @@ interface SettingsBackupModalProps {
   geminiApiKey: string;
   userEmail?: string | null;
   userDisplayName?: string | null;
+  isSignedIn: boolean;
+  activeBookId: string | null;
+  activeBook: SharedBook | null;
   onOpenCloudModal: () => void;
   onSaveGeminiKey: (key: string) => void;
   onImportBackup: (backup: RecipeBookBackup, mode: 'merge' | 'replace') => void;
@@ -32,6 +44,9 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   geminiApiKey,
   userEmail,
   userDisplayName,
+  isSignedIn,
+  activeBookId,
+  activeBook,
   onOpenCloudModal,
   onSaveGeminiKey,
   onImportBackup,
@@ -41,6 +56,12 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [showOtherApps, setShowOtherApps] = useState(false);
+
+  const [newBookName, setNewBookName] = useState('Carnet partagé');
+  const [copyOnCreate, setCopyOnCreate] = useState(true);
+  const [joinCode, setJoinCode] = useState('');
+  const [bookBusy, setBookBusy] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   useEffect(() => {
     if (!showOtherApps) return;
@@ -127,6 +148,245 @@ export const SettingsBackupModal: React.FC<SettingsBackupModalProps> = ({
               <Cloud className="h-3.5 w-3.5 text-fresh-600" />
               {userEmail ? 'Gérer Cloud' : 'Connexion'}
             </button>
+          </section>
+
+          {/* Foyer (carnet commun) */}
+          <section className="rounded-2xl border border-stone-200 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-fresh-600" />
+                <h3 className="text-sm font-bold text-stone-900">
+                  Foyer (recettes en commun)
+                </h3>
+              </div>
+              {activeBookId && (
+                <span className="rounded-full bg-fresh-100 px-2.5 py-0.5 text-[11px] font-bold text-fresh-800">
+                  Actif
+                </span>
+              )}
+            </div>
+
+            {!isSignedIn ? (
+              <div className="rounded-xl bg-stone-50 p-3 text-xs text-stone-600 space-y-2">
+                <p>
+                  Connectez-vous à votre compte Cloud pour créer ou rejoindre un foyer, centraliser
+                  vos recettes avec vos proches et noter les recettes de chacun.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenCloudModal();
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-fresh-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-fresh-700"
+                >
+                  <Cloud className="h-3.5 w-3.5" />
+                  Se connecter au Cloud
+                </button>
+              </div>
+            ) : activeBookId ? (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-fresh-200 bg-fresh-50/60 p-3 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-medium text-stone-500">Foyer actif</p>
+                      <p className="text-sm font-bold text-stone-900">
+                        {activeBook?.name || 'Mon foyer'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <code className="rounded-lg bg-white px-2.5 py-1 text-xs font-extrabold tracking-widest text-fresh-800 ring-1 ring-fresh-200">
+                        {activeBookId}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(activeBookId);
+                          setCopiedCode(true);
+                          setTimeout(() => setCopiedCode(false), 2000);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50"
+                        title="Copier le code du foyer"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        {copiedCode ? 'Copié' : 'Copier'}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-stone-600">
+                    Partagez ce code : chaque membre qui rejoint le foyer y ajoute automatiquement
+                    ses recettes (sans doublons). Chacun reste propriétaire de ses recettes et peut
+                    noter celles des autres.
+                  </p>
+                </div>
+
+                {activeBook && Object.values(activeBook.members ?? {}).length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-stone-700">
+                      Membres ({Object.values(activeBook.members).length})
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {Object.values(activeBook.members).map((m) => (
+                        <span
+                          key={m.uid}
+                          className="inline-flex items-center rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700"
+                          title={m.email || m.displayName}
+                        >
+                          {m.displayName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  disabled={bookBusy}
+                  onClick={async () => {
+                    setBookBusy(true);
+                    setFeedback(null);
+                    try {
+                      await leaveSharedBook();
+                      setFeedback({
+                        type: 'ok',
+                        msg: 'Vous avez quitté le foyer. Vos recettes ont été retirées du foyer et conservées dans votre carnet personnel.',
+                      });
+                    } catch (err) {
+                      setFeedback({
+                        type: 'err',
+                        msg: err instanceof Error ? err.message : 'Erreur lors de la sortie du foyer.',
+                      });
+                    } finally {
+                      setBookBusy(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  Quitter le foyer
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-stone-500">
+                  Créez un foyer ou rejoignez-en un avec un code pour centraliser les recettes de
+                  tout le monde. Vos nouvelles recettes s&apos;y ajoutent automatiquement et chacun
+                  reste propriétaire des siennes.
+                </p>
+
+                {/* Créer */}
+                <div className="rounded-xl border border-stone-200 bg-stone-50/60 p-3 space-y-2.5">
+                  <p className="text-xs font-bold text-stone-800">Créer un nouveau foyer</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newBookName}
+                      onChange={(e) => setNewBookName(e.target.value)}
+                      placeholder="Nom du foyer (ex. Maison)"
+                      className="flex-1 rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-xs focus:border-fresh-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={bookBusy}
+                      onClick={async () => {
+                        setBookBusy(true);
+                        setFeedback(null);
+                        try {
+                          const code = await createSharedBook(
+                            newBookName,
+                            copyOnCreate ? recipes : []
+                          );
+                          setFeedback({
+                            type: 'ok',
+                            msg: `Foyer créé ! Code à partager : ${code}`,
+                          });
+                        } catch (err) {
+                          setFeedback({
+                            type: 'err',
+                            msg:
+                              err instanceof Error
+                                ? err.message
+                                : 'Impossible de créer le foyer.',
+                          });
+                        } finally {
+                          setBookBusy(false);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 rounded-xl bg-fresh-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-fresh-700 disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Créer
+                    </button>
+                  </div>
+                  {recipes.length > 0 && (
+                    <label className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={copyOnCreate}
+                        onChange={(e) => setCopyOnCreate(e.target.checked)}
+                        className="rounded border-stone-300 text-fresh-600 focus:ring-fresh-500"
+                      />
+                      Partager mes {recipes.length} recette{recipes.length > 1 ? 's' : ''} actuelle
+                      {recipes.length > 1 ? 's' : ''} dans le foyer
+                    </label>
+                  )}
+                </div>
+
+                {/* Rejoindre */}
+                <div className="rounded-xl border border-stone-200 bg-stone-50/60 p-3 space-y-2">
+                  <p className="text-xs font-bold text-stone-800">Rejoindre un foyer existant</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                      placeholder="Code (ex. K7M9P2)"
+                      className="flex-1 rounded-xl border border-stone-300 bg-white px-3 py-1.5 text-xs font-mono uppercase tracking-wider focus:border-fresh-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={bookBusy || !joinCode.trim()}
+                      onClick={async () => {
+                        setBookBusy(true);
+                        setFeedback(null);
+                        try {
+                          const res = await joinSharedBook(joinCode, recipes);
+                          setJoinCode('');
+                          const parts = [`Foyer ${res.bookId} rejoint !`];
+                          if (res.addedCount > 0) {
+                            parts.push(
+                              `${res.addedCount} recette${res.addedCount > 1 ? 's' : ''} ajoutée${res.addedCount > 1 ? 's' : ''}.`
+                            );
+                          }
+                          if (res.skippedCount > 0) {
+                            parts.push(
+                              `${res.skippedCount} doublon${res.skippedCount > 1 ? 's' : ''} ignoré${res.skippedCount > 1 ? 's' : ''}.`
+                            );
+                          }
+                          setFeedback({
+                            type: 'ok',
+                            msg: parts.join(' '),
+                          });
+                        } catch (err) {
+                          setFeedback({
+                            type: 'err',
+                            msg:
+                              err instanceof Error
+                                ? err.message
+                                : 'Impossible de rejoindre ce foyer.',
+                          });
+                        } finally {
+                          setBookBusy(false);
+                        }
+                      }}
+                      className="rounded-xl bg-stone-800 px-3 py-1.5 text-xs font-bold text-white hover:bg-stone-900 disabled:opacity-50"
+                    >
+                      Rejoindre
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Export / Import JSON */}

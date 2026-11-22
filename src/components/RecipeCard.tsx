@@ -1,9 +1,13 @@
 import React from 'react';
 import { Clock, Users, Star, CalendarPlus, ChefHat } from 'lucide-react';
 import { Recipe } from '../types/recipe';
+import { formatAverageScore, getRecipeRatingStats } from '../utils/ratings';
 
 interface RecipeCardProps {
   recipe: Recipe;
+  canEdit?: boolean;
+  isInFoyer?: boolean;
+  currentUserId?: string;
   onOpen: (recipe: Recipe) => void;
   onToggleWeekly: (recipeId: string, e: React.MouseEvent) => void;
   onQuickPlan?: (recipe: Recipe, e: React.MouseEvent) => void;
@@ -11,10 +15,16 @@ interface RecipeCardProps {
 
 export const RecipeCard: React.FC<RecipeCardProps> = ({
   recipe,
+  canEdit = true,
+  isInFoyer = false,
+  currentUserId,
   onOpen,
   onToggleWeekly,
   onQuickPlan,
 }) => {
+  const { average, count } = getRecipeRatingStats(recipe);
+  const isMine = !recipe.ownerUid || (currentUserId && recipe.ownerUid === currentUserId);
+
   return (
     <article
       onClick={() => onOpen(recipe)}
@@ -48,19 +58,28 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
           </span>
         </div>
 
-        {/* Bouton "Recette de la semaine" */}
-        <button
-          type="button"
-          onClick={(e) => onToggleWeekly(recipe.id, e)}
-          title={recipe.isWeekly ? 'Retirer des recettes de la semaine' : 'Ajouter aux recettes de la semaine'}
-          className={`absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full shadow-sm backdrop-blur-sm transition-all ${
-            recipe.isWeekly
-              ? 'bg-amber-400 text-stone-900 hover:bg-amber-500'
-              : 'bg-white/90 text-stone-400 hover:bg-white hover:text-amber-500'
-          }`}
-        >
-          <Star className={`h-4 w-4 ${recipe.isWeekly ? 'fill-current' : ''}`} />
-        </button>
+        {/* Bouton "Recette de la semaine" (réservé au propriétaire) */}
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={(e) => onToggleWeekly(recipe.id, e)}
+            title={recipe.isWeekly ? 'Retirer des recettes de la semaine' : 'Ajouter aux recettes de la semaine'}
+            className={`absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full shadow-sm backdrop-blur-sm transition-all ${
+              recipe.isWeekly
+                ? 'bg-amber-400 text-stone-900 hover:bg-amber-500'
+                : 'bg-white/90 text-stone-400 hover:bg-white hover:text-amber-500'
+            }`}
+          >
+            <Star className={`h-4 w-4 ${recipe.isWeekly ? 'fill-current' : ''}`} />
+          </button>
+        ) : recipe.isWeekly ? (
+          <span
+            title="Recette de la semaine"
+            className="absolute right-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full bg-amber-400 text-stone-900 shadow-sm"
+          >
+            <Star className="h-4 w-4 fill-current" />
+          </span>
+        ) : null}
       </div>
 
       {/* Contenu */}
@@ -99,9 +118,22 @@ export const RecipeCard: React.FC<RecipeCardProps> = ({
 
         {/* Pied de carte */}
         <div className="mt-auto flex items-center justify-between pt-3 border-t border-stone-100 text-xs text-stone-500">
-          <span>
-            {recipe.ingredients.length} ingr. · {recipe.steps.length} étapes
-          </span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="truncate">
+              {recipe.ingredients.length} ingr. · {recipe.steps.length} étapes
+              {isInFoyer && recipe.ownerName ? ` · ${isMine ? 'Moi' : recipe.ownerName}` : ''}
+            </span>
+            {count > 0 && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-800 ring-1 ring-inset ring-amber-200/80"
+                title={`Moyenne : ${formatAverageScore(average)}/5 (${count} avis)`}
+              >
+                <Star className="h-3 w-3 fill-amber-400 text-amber-500" />
+                {formatAverageScore(average)}
+                <span className="font-normal text-amber-700/80">({count})</span>
+              </span>
+            )}
+          </div>
           {onQuickPlan && (
             <button
               type="button"

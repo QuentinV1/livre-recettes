@@ -1,11 +1,17 @@
 import {
+  arrayRemove,
+  arrayUnion,
   collection,
+  deleteDoc,
+  deleteField,
   doc,
   DocumentReference,
+  getDoc,
   getDocs,
   onSnapshot,
   setDoc,
   Unsubscribe,
+  updateDoc,
   writeBatch,
 } from 'firebase/firestore';
 import { db, estConnecteFirebase, getFirebaseUser } from '../lib/firebase';
@@ -13,9 +19,13 @@ import {
   DAYS_OF_WEEK,
   Recipe,
   RecipeBookBackup,
+  RecipeRating,
+  SharedBook,
+  SharedBookMember,
   WeeklyPlan,
   createEmptyWeeklyPlan,
 } from '../types/recipe';
+import { getUserDisplayLabel } from './ratings';
 
 const DB_NAME = 'carnet-hellofresh-db';
 const DB_VERSION = 2;
@@ -26,6 +36,7 @@ const LS_RECIPES_FALLBACK = 'hf_recipes_fallback_v1';
 const LS_WEEKLY_PLAN = 'hf_weekly_plan_v1';
 const LS_INITIALIZED = 'hf_initialized_v1';
 const LS_GEMINI_KEY = 'hf_gemini_api_key_v1';
+const LS_ACTIVE_BOOK_ID = 'hf_active_book_id_v1';
 export const LAST_UID_KEY = 'livre_recettes_last_uid';
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
@@ -36,6 +47,8 @@ export interface CloudState {
   syncStatus: SyncStatus;
   syncError: string | null;
   lastSyncedAt: string | null;
+  activeBookId: string | null;
+  activeBook: SharedBook | null;
 }
 
 export const cloudState: CloudState = {
@@ -44,6 +57,8 @@ export const cloudState: CloudState = {
   syncStatus: 'idle',
   syncError: null,
   lastSyncedAt: null,
+  activeBookId: localStorage.getItem(LS_ACTIVE_BOOK_ID) || null,
+  activeBook: null,
 };
 
 type CloudStateListener = (state: CloudState) => void;
@@ -53,13 +68,18 @@ function notifyCloudState() {
   const snapshot: CloudState = {
     ...cloudState,
     syncedCols: { ...cloudState.syncedCols },
+    activeBook: cloudState.activeBook ? { ...cloudState.activeBook } : null,
   };
   cloudListeners.forEach((fn) => fn(snapshot));
 }
 
 export function subscribeCloudState(listener: CloudStateListener): () => void {
   cloudListeners.add(listener);
-  listener({ ...cloudState, syncedCols: { ...cloudState.syncedCols } });
+  listener({
+    ...cloudState,
+    syncedCols: { ...cloudState.syncedCols },
+    activeBook: cloudState.activeBook ? { ...cloudState.activeBook } : null,
+  });
   return () => {
     cloudListeners.delete(listener);
   };
@@ -71,17 +91,38 @@ export function reinitialiserEtatCloud(): void {
   cloudState.syncStatus = 'idle';
   cloudState.syncError = null;
   cloudState.lastSyncedAt = null;
+  cloudState.activeBookId = null;
+  cloudState.activeBook = null;
+  localStorage.removeItem(LS_ACTIVE_BOOK_ID);
   notifyCloudState();
 }
 
 let _suppressCloudSync = false;
 let _syncTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubListeners: Unsubscribe[] = [];
+let unsubRecipesListener: Unsubscribe | null = null;
+let unsubBookListener: Unsubscribe | null = null;
 
 export function arreterListenersFirestore(): void {
   if (_syncTimer) {
     clearTimeout(_syncTimer);
     _syncTimer = null;
+  }
+  if (unsubRecipesListener) {
+    try {
+      unsubRecipesListener();
+    } catch {
+      // ignore
+    }
+    unsubRecipesListener = null;
+  }
+  if (unsubBookListener) {
+    try {
+      unsubBookListener();
+    } catch {
+      // ignore
+    }
+    unsubBookListener = null;
   }
   unsubListeners.forEach((unsub) => {
     try {
@@ -111,7 +152,6 @@ export function cleanForFirestore<T>(obj: T): T {
 
 const ALLOWED_RECIPE_FIELDS = [
   'id',
-  'recipeNumber',
   'title',
   'subtitle',
   'prepTimeMinutes',
@@ -127,6 +167,9 @@ const ALLOWED_RECIPE_FIELDS = [
   'imageFront',
   'imageBack',
   'notes',
+  'ratings',
+  'ownerUid',
+  'ownerName',
   'isWeekly',
   'createdAt',
   'updatedAt',
@@ -295,6 +338,40 @@ function hasAnyPlannedMeal(plan: WeeklyPlan): boolean {
   return false;
 }
 
+function normalizeRatingsFromFirestore(
+  raw: unknown
+): Record<string, RecipeRating> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, RecipeRating> = {};
+  let hasAny = false;
+  for (const [uid, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!val || typeof val !== 'object') continue;
+    const entry = val as Record<string, unknown>;
+    const score = Number(entry.score);
+    if (!Number.isFinite(score) || score < 1 || score > 5) continue;
+    out[uid] = {
+      score: Math.round(score),
+      userName:
+        typeof entry.userName === 'string' && entry.userName.trim()
+          ? entry.userName.trim()
+          : 'Anonyme',
+      updatedAt:
+        typeof entry.updatedAt === 'string' && entry.updatedAt
+          ? entry.updatedAt
+          : new Date().toISOString(),
+    };
+    hasAny = true;
+  }
+  return hasAny ? out : undefined;
+}
+
+function getActiveRecipesCollection(uid: string, bookId: string | null) {
+  if (!db) return null;
+  return bookId
+    ? collection(db, 'recettes_books', bookId, 'recipes')
+    : collection(db, 'recettes_users', uid, 'recipes');
+}
+
 function normalizeRecipeFromFirestore(
   data: Record<string, unknown>,
   docId: string
@@ -305,7 +382,6 @@ function normalizeRecipeFromFirestore(
 
   return {
     id,
-    recipeNumber: strOrUndef(data.recipeNumber),
     title: typeof data.title === 'string' && data.title.trim() ? data.title : 'Recette sans titre',
     subtitle: strOrUndef(data.subtitle),
     prepTimeMinutes: typeof data.prepTimeMinutes === 'number' ? data.prepTimeMinutes : 25,
@@ -327,6 +403,9 @@ function normalizeRecipeFromFirestore(
     imageFront: strOrUndef(data.imageFront),
     imageBack: undefined,
     notes: strOrUndef(data.notes),
+    ratings: normalizeRatingsFromFirestore(data.ratings),
+    ownerUid: strOrUndef(data.ownerUid),
+    ownerName: strOrUndef(data.ownerName),
     isWeekly: Boolean(data.isWeekly),
     createdAt:
       typeof data.createdAt === 'string' && data.createdAt
@@ -339,8 +418,60 @@ function normalizeRecipeFromFirestore(
   };
 }
 
+export function normalizeRecipeTitle(title: string): string {
+  return title
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+export function isRecipeOwnedBy(
+  recipe: Recipe,
+  uid: string | null | undefined
+): boolean {
+  if (!uid) return true;
+  if (!recipe.ownerUid) return true;
+  return recipe.ownerUid === uid;
+}
+
+function stampRecipeOwnership(
+  recipe: Recipe,
+  uid: string,
+  displayName: string
+): Recipe {
+  return {
+    ...recipe,
+    ownerUid: recipe.ownerUid || uid,
+    ownerName: recipe.ownerName || displayName,
+  };
+}
+
+type BatchOp =
+  | { type: 'delete'; ref: DocumentReference }
+  | { type: 'set'; ref: DocumentReference; data: Record<string, unknown> };
+
+async function commitOpsInBatches(ops: BatchOp[]): Promise<void> {
+  if (!db || ops.length === 0) return;
+  const BATCH_LIMIT = 450;
+  for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
+    const batch = writeBatch(db);
+    for (const op of ops.slice(i, i + BATCH_LIMIT)) {
+      if (op.type === 'delete') {
+        batch.delete(op.ref);
+      } else {
+        batch.set(op.ref, op.data);
+      }
+    }
+    await batch.commit();
+  }
+}
+
 /**
- * Push complet des données locales vers Firestore (par lots <= 450 opérations).
+ * Push complet des données de l'utilisateur vers Firestore (par lots <= 450 opérations).
+ * Dans un foyer, seules les recettes appartenant à l'utilisateur courant sont synchronisées
+ * (vers le foyer ET vers sa collection personnelle), sans jamais écraser celles des autres membres.
  */
 export async function syncAllUserDataToFirestore(
   recipes: Recipe[],
@@ -349,51 +480,63 @@ export async function syncAllUserDataToFirestore(
   const user = getFirebaseUser();
   if (!db || !user) return;
   const uid = user.uid;
+  const displayName = getUserDisplayLabel(user);
+  const activeBookId = cloudState.activeBookId;
 
-  const colRef = collection(db, 'recettes_users', uid, 'recipes');
-  const existingSnap = await getDocs(colRef);
-  const currentIds = new Set(recipes.filter((r) => r && r.id).map((r) => String(r.id)));
+  const userColRef = collection(db, 'recettes_users', uid, 'recipes');
+  const myRecipes = (
+    activeBookId ? recipes.filter((r) => isRecipeOwnedBy(r, uid)) : recipes
+  )
+    .filter((r) => r && r.id)
+    .map((r) => stampRecipeOwnership(r, uid, displayName));
+  const myIds = new Set(myRecipes.map((r) => String(r.id)));
 
-  const ops: Array<
-    | { type: 'delete'; ref: DocumentReference }
-    | { type: 'set'; ref: DocumentReference; data: Record<string, unknown> }
-  > = [];
+  const ops: BatchOp[] = [];
 
-  existingSnap.docs.forEach((d) => {
-    if (!currentIds.has(d.id)) {
+  // 1. Synchroniser la collection personnelle de l'utilisateur
+  const existingUserSnap = await getDocs(userColRef);
+  existingUserSnap.docs.forEach((d) => {
+    if (!myIds.has(d.id)) {
       ops.push({ type: 'delete', ref: d.ref });
     }
   });
-
-  recipes.forEach((item) => {
-    if (item && item.id) {
-      ops.push({
-        type: 'set',
-        ref: doc(colRef, String(item.id)),
-        data: prepareRecipeForFirestore(item),
-      });
-    }
+  myRecipes.forEach((item) => {
+    ops.push({
+      type: 'set',
+      ref: doc(userColRef, String(item.id)),
+      data: prepareRecipeForFirestore(item),
+    });
   });
 
-  const BATCH_LIMIT = 450;
-  if (ops.length === 0) {
-    const batch = writeBatch(db);
-    await batch.commit();
-  } else {
-    for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
-      const batch = writeBatch(db);
-      const chunk = ops.slice(i, i + BATCH_LIMIT);
-      for (const op of chunk) {
-        if (op.type === 'delete') {
-          batch.delete(op.ref);
-        } else {
-          batch.set(op.ref, op.data);
-        }
+  // 2. Si l'utilisateur est dans un foyer, synchroniser uniquement SES recettes dans le foyer
+  if (activeBookId) {
+    const bookColRef = collection(db, 'recettes_books', activeBookId, 'recipes');
+    const existingBookSnap = await getDocs(bookColRef);
+    const foreignIds = new Set<string>();
+
+    existingBookSnap.docs.forEach((d) => {
+      const data = d.data() as Record<string, unknown>;
+      const docOwner = typeof data.ownerUid === 'string' ? data.ownerUid : null;
+      if (docOwner && docOwner !== uid) {
+        foreignIds.add(d.id);
+      } else if (!myIds.has(d.id)) {
+        ops.push({ type: 'delete', ref: d.ref });
       }
-      await batch.commit();
-    }
+    });
+
+    myRecipes.forEach((item) => {
+      const id = String(item.id);
+      if (!foreignIds.has(id)) {
+        ops.push({
+          type: 'set',
+          ref: doc(bookColRef, id),
+          data: prepareRecipeForFirestore(item),
+        });
+      }
+    });
   }
 
+  await commitOpsInBatches(ops);
   await setDocSettingsFirestore(weeklyPlan);
 }
 
@@ -406,8 +549,10 @@ export async function setDocSettingsFirestore(weeklyPlan: WeeklyPlan): Promise<v
     cleanForFirestore({
       id: 'main',
       weeklyPlan,
+      activeBookId: cloudState.activeBookId ?? null,
       updatedAt: new Date().toISOString(),
-    })
+    }),
+    { merge: true }
   );
 }
 
@@ -464,6 +609,7 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
   const previousUid = localStorage.getItem(LAST_UID_KEY);
   const isNewDeviceLogin = Boolean(currentUid && previousUid !== currentUid);
   let needsPushAfterInit = false;
+  let currentListeningBookId: string | null | undefined = undefined;
 
   const checkInitDone = () => {
     if (!cloudState.initialSyncDone && Object.keys(cloudState.syncedCols).length >= 2) {
@@ -493,14 +639,64 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
     notifyCloudState();
   };
 
-  // 1. Collection recipes
-  const recipesColRef = collection(db, 'recettes_users', currentUid, 'recipes');
-  unsubListeners.push(
-    onSnapshot(
+  const ensureRecipesListener = (targetBookId: string | null) => {
+    if (!db || currentListeningBookId === targetBookId) return;
+    const isSwitchingBook = currentListeningBookId !== undefined;
+    currentListeningBookId = targetBookId;
+
+    cloudState.activeBookId = targetBookId;
+    if (targetBookId) {
+      localStorage.setItem(LS_ACTIVE_BOOK_ID, targetBookId);
+    } else {
+      localStorage.removeItem(LS_ACTIVE_BOOK_ID);
+      cloudState.activeBook = null;
+    }
+    notifyCloudState();
+
+    if (unsubRecipesListener) {
+      unsubRecipesListener();
+      unsubRecipesListener = null;
+    }
+    if (unsubBookListener) {
+      unsubBookListener();
+      unsubBookListener = null;
+    }
+
+    if (targetBookId) {
+      const bookDocRef = doc(db, 'recettes_books', targetBookId);
+      unsubBookListener = onSnapshot(
+        bookDocRef,
+        (bookSnap) => {
+          if (bookSnap.exists()) {
+            const bData = bookSnap.data() as Record<string, unknown>;
+            cloudState.activeBook = {
+              id: bookSnap.id,
+              name: typeof bData.name === 'string' && bData.name ? bData.name : 'Carnet partagé',
+              ownerUid: String(bData.ownerUid || ''),
+              memberUids: Array.isArray(bData.memberUids) ? (bData.memberUids as string[]) : [],
+              members:
+                bData.members && typeof bData.members === 'object'
+                  ? (bData.members as Record<string, SharedBookMember>)
+                  : {},
+              createdAt: String(bData.createdAt || ''),
+              updatedAt: String(bData.updatedAt || ''),
+            };
+          } else {
+            cloudState.activeBook = null;
+          }
+          notifyCloudState();
+        },
+        (err) => handleErr('book', err)
+      );
+    }
+
+    const recipesColRef = getActiveRecipesCollection(currentUid, targetBookId);
+    if (!recipesColRef) return;
+
+    unsubRecipesListener = onSnapshot(
       recipesColRef,
       async (snap) => {
         const fromCache = snap.metadata.fromCache;
-        // Ne jamais traiter un cache local vide comme un serveur vide
         if (fromCache && snap.docs.length === 0) {
           return;
         }
@@ -514,14 +710,12 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
         const isFirstServerForCol = !fromCache && !cloudState.syncedCols.recipes;
         const localItems = callbacks.getLocalRecipes();
 
-        if (isFirstServerForCol) {
+        if (isFirstServerForCol && !isSwitchingBook && !targetBookId) {
           cloudState.syncedCols.recipes = true;
 
           if (serverList.length === 0 && localItems.length > 0) {
-            // Serveur vide et données locales présentes : pousser après init
             needsPushAfterInit = true;
           } else if (serverList.length > 0 && localItems.length > 0 && isNewDeviceLogin) {
-            // Nouvel appareil/compte : fusionner serveur + éléments locaux absents du serveur
             const serverIds = new Set(serverList.map((i) => String(i.id)));
             const localOnly = localItems.filter(
               (i) => i && i.id && !serverIds.has(String(i.id))
@@ -543,6 +737,10 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
 
           checkInitDone();
         } else {
+          if (isFirstServerForCol) {
+            cloudState.syncedCols.recipes = true;
+            checkInitDone();
+          }
           _suppressCloudSync = true;
           await saveLocalRecipesOnly(serverList);
           callbacks.onRecipesChange(serverList);
@@ -550,10 +748,10 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
         }
       },
       (err) => handleErr('recipes', err)
-    )
-  );
+    );
+  };
 
-  // 2. Document settings/main (planning hebdomadaire & préférences)
+  // Document settings/main (planning hebdomadaire & carnet partagé actif)
   const settingsDocRef = doc(db, 'recettes_users', currentUid, 'settings', 'main');
   unsubListeners.push(
     onSnapshot(
@@ -563,6 +761,16 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
         if (fromCache && !snap.exists()) {
           return;
         }
+
+        const rawData = snap.exists()
+          ? (snap.data() as { weeklyPlan?: Partial<WeeklyPlan>; activeBookId?: string | null } | undefined)
+          : undefined;
+        const serverBookId =
+          typeof rawData?.activeBookId === 'string' && rawData.activeBookId.trim()
+            ? rawData.activeBookId.trim()
+            : null;
+
+        ensureRecipesListener(serverBookId);
 
         const isFirstServerForSettings = !fromCache && !cloudState.syncedCols.settings;
         const localPlan = callbacks.getLocalWeeklyPlan();
@@ -575,7 +783,6 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
               needsPushAfterInit = true;
             }
           } else {
-            const rawData = snap.data() as { weeklyPlan?: Partial<WeeklyPlan> } | undefined;
             const serverPlan: WeeklyPlan = {
               ...createEmptyWeeklyPlan(),
               ...(rawData?.weeklyPlan ?? {}),
@@ -623,7 +830,6 @@ export async function activerSyncCloud(callbacks: ActiverSyncCallbacks): Promise
 
           checkInitDone();
         } else if (snap.exists()) {
-          const rawData = snap.data() as { weeklyPlan?: Partial<WeeklyPlan> } | undefined;
           const serverPlan: WeeklyPlan = {
             ...createEmptyWeeklyPlan(),
             ...(rawData?.weeklyPlan ?? {}),
@@ -666,6 +872,274 @@ export async function forcerSyncCloud(
     notifyCloudState();
     throw new Error(cloudState.syncError);
   }
+}
+
+function generateBookCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
+export async function rateRecipeInCloud(
+  recipeId: string,
+  rating: RecipeRating | null
+): Promise<void> {
+  const user = getFirebaseUser();
+  if (!db || !user) return;
+  const colRef = getActiveRecipesCollection(user.uid, cloudState.activeBookId);
+  if (!colRef) return;
+  const recipeRef = doc(colRef, String(recipeId));
+  await updateDoc(recipeRef, {
+    [`ratings.${user.uid}`]: rating ? cleanForFirestore(rating) : deleteField(),
+  });
+}
+
+export async function createSharedBook(
+  name: string,
+  recipesToCopy: Recipe[]
+): Promise<string> {
+  const user = getFirebaseUser();
+  if (!db || !user) {
+    throw new Error('Connectez-vous au Cloud pour créer un foyer.');
+  }
+
+  let bookId = generateBookCode();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const existing = await getDoc(doc(db, 'recettes_books', bookId));
+    if (!existing.exists()) break;
+    bookId = generateBookCode();
+  }
+
+  const now = new Date().toISOString();
+  const displayName = getUserDisplayLabel(user);
+  const member: SharedBookMember = {
+    uid: user.uid,
+    displayName,
+    email: user.email ?? undefined,
+    joinedAt: now,
+  };
+
+  const bookData: SharedBook = {
+    id: bookId,
+    name: name.trim() || 'Mon foyer',
+    ownerUid: user.uid,
+    memberUids: [user.uid],
+    members: { [user.uid]: member },
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await setDoc(doc(db, 'recettes_books', bookId), cleanForFirestore(bookData));
+
+  if (recipesToCopy.length > 0) {
+    const bookColRef = collection(db, 'recettes_books', bookId, 'recipes');
+    const userColRef = collection(db, 'recettes_users', user.uid, 'recipes');
+    const seenIds = new Set<string>();
+    const seenTitles = new Set<string>();
+    const ops: BatchOp[] = [];
+
+    for (const item of recipesToCopy) {
+      if (!item || !item.id) continue;
+      const id = String(item.id);
+      const normTitle = normalizeRecipeTitle(item.title || '');
+      if (seenIds.has(id) || (normTitle && seenTitles.has(normTitle))) {
+        continue;
+      }
+      seenIds.add(id);
+      if (normTitle) seenTitles.add(normTitle);
+
+      const stamped = stampRecipeOwnership(item, user.uid, displayName);
+      const payload = prepareRecipeForFirestore(stamped);
+      ops.push({ type: 'set', ref: doc(bookColRef, id), data: payload });
+      ops.push({ type: 'set', ref: doc(userColRef, id), data: payload });
+    }
+
+    await commitOpsInBatches(ops);
+  }
+
+  const settingsRef = doc(db, 'recettes_users', user.uid, 'settings', 'main');
+  await setDoc(
+    settingsRef,
+    cleanForFirestore({ id: 'main', activeBookId: bookId, updatedAt: now }),
+    { merge: true }
+  );
+
+  return bookId;
+}
+
+export interface JoinFoyerResult {
+  bookId: string;
+  addedCount: number;
+  skippedCount: number;
+}
+
+export async function joinSharedBook(
+  code: string,
+  localRecipes: Recipe[] = []
+): Promise<JoinFoyerResult> {
+  const user = getFirebaseUser();
+  if (!db || !user) {
+    throw new Error('Connectez-vous au Cloud pour rejoindre un foyer.');
+  }
+
+  const bookId = code.trim().toUpperCase();
+  if (!bookId) {
+    throw new Error('Veuillez saisir un code de foyer.');
+  }
+
+  const bookRef = doc(db, 'recettes_books', bookId);
+  const snap = await getDoc(bookRef);
+  if (!snap.exists()) {
+    throw new Error('Aucun foyer trouvé avec ce code.');
+  }
+
+  const now = new Date().toISOString();
+  const displayName = getUserDisplayLabel(user);
+  const member: SharedBookMember = {
+    uid: user.uid,
+    displayName,
+    email: user.email ?? undefined,
+    joinedAt: now,
+  };
+
+  // Rejoindre le foyer d'abord pour que les règles Firestore autorisent la lecture/écriture dans le foyer
+  await updateDoc(bookRef, {
+    memberUids: arrayUnion(user.uid),
+    [`members.${user.uid}`]: cleanForFirestore(member),
+    updatedAt: now,
+  });
+
+  // Récupérer les recettes personnelles de l'utilisateur (Cloud + locales éventuelles)
+  const userColRef = collection(db, 'recettes_users', user.uid, 'recipes');
+  const userSnap = await getDocs(userColRef);
+  const personalById = new Map<string, Recipe>();
+  for (const d of userSnap.docs) {
+    const rec = normalizeRecipeFromFirestore(d.data() as Record<string, unknown>, d.id);
+    personalById.set(rec.id, rec);
+  }
+  for (const r of localRecipes) {
+    if (r && r.id && isRecipeOwnedBy(r, user.uid) && !personalById.has(String(r.id))) {
+      personalById.set(String(r.id), { ...r, id: String(r.id) });
+    }
+  }
+
+  // Récupérer les recettes déjà présentes dans le foyer pour éviter les doublons
+  const bookColRef = collection(db, 'recettes_books', bookId, 'recipes');
+  const bookRecipesSnap = await getDocs(bookColRef);
+  const existingIds = new Set<string>();
+  const existingTitles = new Set<string>();
+  for (const d of bookRecipesSnap.docs) {
+    existingIds.add(d.id);
+    const data = d.data() as Record<string, unknown>;
+    if (typeof data.title === 'string') {
+      const norm = normalizeRecipeTitle(data.title);
+      if (norm) existingTitles.add(norm);
+    }
+  }
+
+  const ops: BatchOp[] = [];
+  let addedCount = 0;
+  let skippedCount = 0;
+
+  for (const rec of personalById.values()) {
+    const id = String(rec.id);
+    const normTitle = normalizeRecipeTitle(rec.title || '');
+    if (existingIds.has(id) || (normTitle && existingTitles.has(normTitle))) {
+      skippedCount += 1;
+      continue;
+    }
+    existingIds.add(id);
+    if (normTitle) existingTitles.add(normTitle);
+
+    const stamped = stampRecipeOwnership(rec, user.uid, displayName);
+    const payload = prepareRecipeForFirestore(stamped);
+    ops.push({ type: 'set', ref: doc(bookColRef, id), data: payload });
+    ops.push({ type: 'set', ref: doc(userColRef, id), data: payload });
+    addedCount += 1;
+  }
+
+  await commitOpsInBatches(ops);
+
+  const settingsRef = doc(db, 'recettes_users', user.uid, 'settings', 'main');
+  await setDoc(
+    settingsRef,
+    cleanForFirestore({ id: 'main', activeBookId: bookId, updatedAt: now }),
+    { merge: true }
+  );
+
+  return { bookId, addedCount, skippedCount };
+}
+
+export async function leaveSharedBook(): Promise<void> {
+  const user = getFirebaseUser();
+  if (!db || !user) return;
+
+  const bookId = cloudState.activeBookId;
+  const now = new Date().toISOString();
+
+  if (bookId) {
+    const bookRef = doc(db, 'recettes_books', bookId);
+    const bookColRef = collection(db, 'recettes_books', bookId, 'recipes');
+    const userColRef = collection(db, 'recettes_users', user.uid, 'recipes');
+
+    const [bookSnap, bookRecipesSnap] = await Promise.all([
+      getDoc(bookRef),
+      getDocs(bookColRef),
+    ]);
+
+    const bookOwnerUid = bookSnap.exists()
+      ? String((bookSnap.data() as Record<string, unknown>).ownerUid || '')
+      : '';
+
+    const ops: BatchOp[] = [];
+    for (const d of bookRecipesSnap.docs) {
+      const data = d.data() as Record<string, unknown>;
+      const docOwner = typeof data.ownerUid === 'string' ? data.ownerUid : null;
+      const isMine =
+        docOwner === user.uid || (!docOwner && bookOwnerUid === user.uid);
+      if (isMine) {
+        // S'assurer que la recette reste bien sauvegardée dans le carnet personnel
+        const rec = normalizeRecipeFromFirestore(data, d.id);
+        ops.push({
+          type: 'set',
+          ref: doc(userColRef, d.id),
+          data: prepareRecipeForFirestore(
+            stampRecipeOwnership(rec, user.uid, getUserDisplayLabel(user))
+          ),
+        });
+        ops.push({ type: 'delete', ref: d.ref });
+      }
+    }
+
+    await commitOpsInBatches(ops);
+
+    if (bookSnap.exists()) {
+      const bData = bookSnap.data() as Record<string, unknown>;
+      const memberUids = Array.isArray(bData.memberUids)
+        ? (bData.memberUids as string[])
+        : [];
+      const remaining = memberUids.filter((id) => id !== user.uid);
+      if (remaining.length === 0) {
+        await deleteDoc(bookRef);
+      } else {
+        await updateDoc(bookRef, {
+          memberUids: arrayRemove(user.uid),
+          [`members.${user.uid}`]: deleteField(),
+          updatedAt: now,
+        });
+      }
+    }
+  }
+
+  const settingsRef = doc(db, 'recettes_users', user.uid, 'settings', 'main');
+  await setDoc(
+    settingsRef,
+    cleanForFirestore({ id: 'main', activeBookId: null, updatedAt: now }),
+    { merge: true }
+  );
 }
 
 export function loadGeminiApiKey(): string {

@@ -47,7 +47,6 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
 }) => {
   const isEditing = !!initialRecipe;
 
-  const [recipeNumber, setRecipeNumber] = useState(initialRecipe?.recipeNumber ?? '');
   const [title, setTitle] = useState(initialRecipe?.title ?? '');
   const [subtitle, setSubtitle] = useState(initialRecipe?.subtitle ?? '');
   const [prepTimeMinutes, setPrepTimeMinutes] = useState(initialRecipe?.prepTimeMinutes ?? 30);
@@ -111,7 +110,6 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
   };
 
   const applyDraft = (draft: Partial<ReturnType<typeof parseRecipeText>> & { dishImage?: string }) => {
-    if (draft.recipeNumber) setRecipeNumber(draft.recipeNumber);
     if (draft.title) setTitle(draft.title);
     if (draft.subtitle) setSubtitle(draft.subtitle);
     if (draft.prepTimeMinutes) setPrepTimeMinutes(draft.prepTimeMinutes);
@@ -244,7 +242,6 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
     const now = new Date().toISOString();
     const saved: Recipe = {
       id: initialRecipe?.id ?? `rec-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      recipeNumber: recipeNumber.trim() || undefined,
       title: title.trim(),
       subtitle: subtitle.trim() || undefined,
       prepTimeMinutes: Math.max(1, Number(prepTimeMinutes) || 20),
@@ -606,31 +603,17 @@ export const RecipeFormModal: React.FC<RecipeFormModalProps> = ({
               </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div>
-                <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
-                  N° Fiche (optionnel)
-                </label>
-                <input
-                  type="text"
-                  value={recipeNumber}
-                  onChange={(e) => setRecipeNumber(e.target.value)}
-                  placeholder="Ex: Recette 244"
-                  className="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm text-stone-800 focus:border-fresh-500 focus:outline-none"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
-                  Mes ustensiles (séparés par des virgules)
-                </label>
-                <input
-                  type="text"
-                  value={utensilsText}
-                  onChange={(e) => setUtensilsText(e.target.value)}
-                  placeholder="Ex: Bol, sauteuse, passoire, râpe, casserole"
-                  className="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm text-stone-800 focus:border-fresh-500 focus:outline-none"
-                />
-              </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
+                Mes ustensiles (séparés par des virgules)
+              </label>
+              <input
+                type="text"
+                value={utensilsText}
+                onChange={(e) => setUtensilsText(e.target.value)}
+                placeholder="Ex: Bol, sauteuse, passoire, râpe, casserole"
+                className="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm text-stone-800 focus:border-fresh-500 focus:outline-none"
+              />
             </div>
           </section>
 

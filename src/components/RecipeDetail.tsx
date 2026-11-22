@@ -17,28 +17,37 @@ import {
   X,
 } from 'lucide-react';
 import { Recipe } from '../types/recipe';
+import { formatAverageScore, getRecipeRatingStats } from '../utils/ratings';
 import { CookingModeModal, scaleQuantity } from './CookingModeModal';
 
 interface RecipeDetailProps {
   recipe: Recipe;
   initialServings?: number;
   backLabel?: string;
+  currentUserId: string;
+  canEdit?: boolean;
+  isInFoyer?: boolean;
   onBack: () => void;
   onEdit: (recipe: Recipe) => void;
   onDelete?: (id: string) => void;
   onToggleWeekly: (id: string) => void;
   onPlanRecipe: (recipe: Recipe) => void;
+  onRate: (recipeId: string, score: number | null) => void;
 }
 
 export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   recipe,
   initialServings,
   backLabel = 'Catalogue',
+  currentUserId,
+  canEdit = true,
+  isInFoyer = false,
   onBack,
   onEdit,
   onDelete,
   onToggleWeekly,
   onPlanRecipe,
+  onRate,
 }) => {
   const [activePhoto, setActivePhoto] = useState<'front' | 'back'>('front');
   const [targetServings, setTargetServings] = useState<number>(
@@ -53,6 +62,10 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
   const [cookingModeOpen, setCookingModeOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+
+  const ratingStats = getRecipeRatingStats(recipe);
+  const myRating = recipe.ratings?.[currentUserId]?.score ?? 0;
 
   const multiplier = recipe.servings > 0 ? targetServings / recipe.servings : 1;
 
@@ -88,20 +101,28 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         </button>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onToggleWeekly(recipe.id)}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${
-              recipe.isWeekly
-                ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200'
-                : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-50'
-            }`}
-          >
-            <Star className={`h-4 w-4 ${recipe.isWeekly ? 'fill-amber-500 text-amber-500' : ''}`} />
-            <span className="hidden sm:inline">
-              {recipe.isWeekly ? 'Recette de la semaine' : 'Semaine'}
+          {isInFoyer && !canEdit && (
+            <span className="inline-flex items-center rounded-xl bg-stone-100 px-3 py-2 text-xs font-semibold text-stone-600">
+              Par {recipe.ownerName || 'un membre'} · Lecture &amp; note
             </span>
-          </button>
+          )}
+
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => onToggleWeekly(recipe.id)}
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${
+                recipe.isWeekly
+                  ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300 hover:bg-amber-200'
+                  : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-50'
+              }`}
+            >
+              <Star className={`h-4 w-4 ${recipe.isWeekly ? 'fill-amber-500 text-amber-500' : ''}`} />
+              <span className="hidden sm:inline">
+                {recipe.isWeekly ? 'Recette de la semaine' : 'Semaine'}
+              </span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -112,16 +133,18 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
             <span className="hidden sm:inline">Planifier</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => onEdit(recipe)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
-          >
-            <Pencil className="h-4 w-4" />
-            <span className="hidden sm:inline">Modifier</span>
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => onEdit(recipe)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
+            >
+              <Pencil className="h-4 w-4" />
+              <span className="hidden sm:inline">Modifier</span>
+            </button>
+          )}
 
-          {onDelete && (!confirmDelete ? (
+          {canEdit && onDelete && (!confirmDelete ? (
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
@@ -210,11 +233,6 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
         {/* En-tête Recette */}
         <div className="p-4 sm:p-8">
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            {recipe.recipeNumber && (
-              <span className="inline-flex items-center rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-bold text-stone-700">
-                {recipe.recipeNumber}
-              </span>
-            )}
             {recipe.tags.map((tag) => (
               <span
                 key={tag}
@@ -290,6 +308,113 @@ export const RecipeDetail: React.FC<RecipeDetailProps> = ({
               <ChefHat className="h-5 w-5" />
               Mode Cuisine pas à pas
             </button>
+          </div>
+
+          {/* Notes & Avis par personne */}
+          <div className="mt-5 rounded-2xl border border-amber-200/70 bg-amber-50/40 p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
+                  <Star className="h-5 w-5 fill-amber-400 text-amber-500" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-stone-500">
+                    Note moyenne
+                  </p>
+                  {ratingStats.count > 0 ? (
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-display text-xl font-extrabold text-stone-900">
+                        {formatAverageScore(ratingStats.average)}
+                        <span className="text-sm font-semibold text-stone-500"> / 5</span>
+                      </span>
+                      <span className="text-xs text-stone-500">
+                        ({ratingStats.count} {ratingStats.count > 1 ? 'avis' : 'avis'})
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-sm font-medium text-stone-600">
+                      Aucune note pour l&apos;instant
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Sélecteur de note personnelle */}
+              <div className="flex flex-col items-start sm:items-end gap-1">
+                <span className="text-xs font-semibold text-stone-600">
+                  {myRating > 0 ? `Votre note : ${myRating}/5` : 'Noter cette recette'}
+                </span>
+                <div
+                  className="flex items-center gap-1"
+                  onMouseLeave={() => setHoverRating(null)}
+                >
+                  {[1, 2, 3, 4, 5].map((starValue) => {
+                    const active = (hoverRating ?? myRating) >= starValue;
+                    return (
+                      <button
+                        key={starValue}
+                        type="button"
+                        onMouseEnter={() => setHoverRating(starValue)}
+                        onClick={() =>
+                          onRate(recipe.id, myRating === starValue ? null : starValue)
+                        }
+                        className="rounded-lg p-1 transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        title={
+                          myRating === starValue
+                            ? 'Cliquer pour retirer votre note'
+                            : `Donner ${starValue} étoile${starValue > 1 ? 's' : ''}`
+                        }
+                        aria-label={`Noter ${starValue} sur 5`}
+                      >
+                        <Star
+                          className={`h-6 w-6 transition-colors ${
+                            active
+                              ? 'fill-amber-400 text-amber-500'
+                              : 'text-stone-300 hover:text-amber-300'
+                          }`}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {ratingStats.entries.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-amber-200/60 flex flex-wrap gap-2">
+                {ratingStats.entries.map((entry) => {
+                  const isMe = entry.uid === currentUserId;
+                  return (
+                    <div
+                      key={entry.uid}
+                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs border ${
+                        isMe
+                          ? 'border-amber-300 bg-amber-100/80 text-stone-900 font-semibold'
+                          : 'border-stone-200 bg-white text-stone-700'
+                      }`}
+                    >
+                      <span>
+                        {entry.userName}
+                        {isMe ? ' (vous)' : ''}
+                      </span>
+                      <span className="inline-flex items-center gap-0.5 text-amber-500">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star
+                            key={s}
+                            className={`h-3 w-3 ${
+                              entry.score >= s ? 'fill-amber-400 text-amber-500' : 'text-stone-200'
+                            }`}
+                          />
+                        ))}
+                      </span>
+                      <span className="text-[11px] font-bold text-stone-600">
+                        {entry.score}/5
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Grille Ingrédients + Étapes */}

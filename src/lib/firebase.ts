@@ -1,4 +1,5 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
+import { clearAuthCache } from './accessControl';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import {
   getAuth,
@@ -159,6 +160,7 @@ export async function rechargerUtilisateurFirebase(): Promise<User | null> {
 }
 
 export async function deconnexionFirebase(): Promise<void> {
+  clearAuthCache('livre-recettes');
   if (!auth) return;
   await signOut(auth);
   currentUser = null;

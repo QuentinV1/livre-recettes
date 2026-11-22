@@ -18,7 +18,12 @@ import {
   User as UserIcon,
   FileStack,
 } from 'lucide-react';
-import { deconnexionFirebase, observerAuth } from './lib/firebase';
+import { db, deconnexionFirebase, observerAuth } from './lib/firebase';
+import {
+  clearAuthCache,
+  resolveUserAccess,
+  type AccessStatus,
+} from './lib/accessControl';
 import {
   DAYS_OF_WEEK,
   DayOfWeek,
@@ -46,7 +51,7 @@ import {
   saveGeminiApiKey,
   subscribeCloudState,
 } from './utils/storage';
-import { CloudAuthModal } from './components/AuthScreen';
+import { AuthGateScreen, CloudAuthModal } from './components/AuthScreen';
 import { RecipeCard } from './components/RecipeCard';
 import { RecipeDetail } from './components/RecipeDetail';
 import { RecipeFormModal } from './components/RecipeFormModal';
@@ -60,6 +65,9 @@ const APP_VERSION = '1.1.0';
 
 export function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [authResolved, setAuthResolved] = useState(false);
+  const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(null);
+  const [accessChecking, setAccessChecking] = useState(false);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan>(createEmptyWeeklyPlan);
   const [geminiApiKey, setGeminiApiKey] = useState('');
@@ -127,7 +135,42 @@ export function App() {
     });
   }, [updateRecipesState, updateWeeklyPlanState]);
 
-  // Chargement initial local-first puis écoute Auth
+  const verifyAndSyncUser = useCallback(
+    async (firebaseUser: FirebaseUser | null) => {
+      if (!firebaseUser) {
+        setAccessStatus(null);
+        setAccessChecking(false);
+        setAuthResolved(true);
+        clearAuthCache('livre-recettes');
+        arreterListenersFirestore();
+        reinitialiserEtatCloud();
+        return;
+      }
+
+      setAccessChecking(true);
+      try {
+        const status = await resolveUserAccess(
+          db,
+          'livre-recettes',
+          firebaseUser.email,
+          firebaseUser.uid
+        );
+        setAccessStatus(status);
+        if (status.hasAppAccess) {
+          void startCloudSync();
+        } else {
+          arreterListenersFirestore();
+          reinitialiserEtatCloud();
+        }
+      } finally {
+        setAccessChecking(false);
+        setAuthResolved(true);
+      }
+    },
+    [startCloudSync]
+  );
+
+  // Chargement initial local-first puis écoute Auth + Whitelist
   useEffect(() => {
     let unsubAuth: (() => void) | null = null;
     let cancelled = false;
@@ -145,17 +188,13 @@ export function App() {
         unsubAuth = observerAuth((firebaseUser) => {
           if (cancelled) return;
           setUser(firebaseUser);
-          if (firebaseUser) {
-            void startCloudSync();
-          } else {
-            arreterListenersFirestore();
-            reinitialiserEtatCloud();
-          }
+          void verifyAndSyncUser(firebaseUser);
         });
       })
       .catch(() => {
         if (cancelled) return;
         setLoading(false);
+        setAuthResolved(true);
       });
 
     return () => {
@@ -163,7 +202,19 @@ export function App() {
       if (unsubAuth) unsubAuth();
       arreterListenersFirestore();
     };
-  }, [startCloudSync, updateRecipesState, updateWeeklyPlanState]);
+  }, [updateRecipesState, updateWeeklyPlanState, verifyAndSyncUser]);
+
+  // Revalidation immédiate au retour en ligne (révocation si retiré de la whitelist)
+  useEffect(() => {
+    if (!user) return;
+    const handleOnline = () => {
+      void verifyAndSyncUser(user);
+    };
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [user, verifyAndSyncUser]);
 
   const selectedRecipe = useMemo(
     () => recipes.find((r) => r.id === selectedRecipeId) ?? null,
@@ -385,6 +436,7 @@ export function App() {
     arreterListenersFirestore();
     await deconnexionFirebase();
     reinitialiserEtatCloud();
+    setAccessStatus(null);
     setUser(null);
   };
 
@@ -404,6 +456,25 @@ export function App() {
 
   const visibleSyncError =
     cloud.syncError && cloud.syncError !== dismissedError ? cloud.syncError : null;
+
+  if (loading || !authResolved || (!accessStatus && accessChecking)) {
+    return <AuthGateScreen mode="loading" onSignOut={handleSignOut} />;
+  }
+
+  if (!user) {
+    return <AuthGateScreen mode="unauthenticated" onSignOut={handleSignOut} />;
+  }
+
+  if (!accessStatus?.hasAppAccess) {
+    return (
+      <AuthGateScreen
+        mode="unauthorized"
+        userEmail={user.email}
+        onSignOut={handleSignOut}
+        onRetryAccess={() => verifyAndSyncUser(user)}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-cream text-stone-900 flex flex-col">
